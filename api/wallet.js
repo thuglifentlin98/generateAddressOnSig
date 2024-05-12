@@ -1,5 +1,5 @@
-const { generateWallet } = require('../hdWallet');
-const { generateAddressesFromWIF } = require('../key');
+const { generateWallet } = require('./hdWallet');
+const { generateAddressesFromWIF } = require('./key');
 const bip39 = require('bip39');
 
 module.exports = async (req, res) => {
