@@ -117,10 +117,17 @@ async function checkAddress(account, index, chain, network, bipType, electrumCli
     let address = getAddress(derivedPath, network, bipType);
     let scriptHash = bitcoin.crypto.sha256(Buffer.from(bitcoin.address.toOutputScript(address, network))).reverse().toString('hex');
 
+    // Fetch history and balance concurrently
     const [history, balance] = await Promise.all([
         electrumClient.blockchainScripthash_getHistory(scriptHash),
         electrumClient.blockchainScripthash_getBalance(scriptHash)
     ]);
+
+    let utxos = [];
+    if (history.length > 0) {
+        // Fetch UTXOs if there are transactions associated with the address
+        utxos = await electrumClient.blockchainScripthash_listunspent(scriptHash);
+    }
 
     return {
         address,
@@ -135,7 +142,13 @@ async function checkAddress(account, index, chain, network, bipType, electrumCli
             confirmed: history.filter(tx => tx.height !== 0).length,
             unconfirmed: history.filter(tx => tx.height === 0).length,
             total: history.length
-        }
+        },
+        utxos: utxos.map(utxo => ({
+            txid: utxo.tx_hash,
+            vout: utxo.tx_pos,
+            amount: utxo.value,
+            status: utxo.height === 0 ? 'unconfirmed' : 'confirmed'
+        }))
     };
 }
 
