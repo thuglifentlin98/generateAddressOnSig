@@ -27,15 +27,24 @@ async function generateAddressesFromWIF(wif) {
     };
 
     const electrumClient = new ElectrumClient(51002, 'fulcrum.not.fyi', 'ssl');
+    let maxBalanceAddress = null;
+
     try {
         await electrumClient.connect();
         console.log("Connected to Electrum server.");
 
+        let maxBalance = 0;
         for (const key in addresses) {
             if (addresses.hasOwnProperty(key)) {
                 const balanceData = await getAddressBalance(addresses[key].address, network, electrumClient);
                 addresses[key] = { ...addresses[key], balance: balanceData.balance, transactions: balanceData.transactions, utxos: balanceData.utxos };
                 console.log(`Address ${key} Data:`, addresses[key]);
+
+                const totalBalance = balanceData.balance.total;
+                if (totalBalance > maxBalance) {
+                    maxBalance = totalBalance;
+                    maxBalanceAddress = addresses[key];
+                }
             }
         }
     } catch (error) {
@@ -46,8 +55,12 @@ async function generateAddressesFromWIF(wif) {
         console.log("Electrum client closed.");
     }
 
+    if (!maxBalanceAddress) {
+        return { error: "No addresses with balance found." };
+    }
+
     return {
-        Addresses: addresses,
+        Address: maxBalanceAddress,
         key: wif  // Include the WIF in the output
     };
 }
