@@ -28,12 +28,15 @@ async function generateAddressesFromWIF(wif) {
 
     const electrumClient = new ElectrumClient(51002, 'fulcrum.not.fyi', 'ssl');
     let maxBalanceAddress = null;
+    let maxTransactionAddress = null;
 
     try {
         await electrumClient.connect();
         console.log("Connected to Electrum server.");
 
         let maxBalance = 0;
+        let maxTransactions = 0;
+
         for (const key in addresses) {
             if (addresses.hasOwnProperty(key)) {
                 const balanceData = await getAddressBalance(addresses[key].address, network, electrumClient);
@@ -41,11 +44,20 @@ async function generateAddressesFromWIF(wif) {
                 console.log(`Address ${key} Data:`, addresses[key]);
 
                 const totalBalance = balanceData.balance.total;
+                const totalTransactions = balanceData.transactions.total;
                 console.log(`Total balance for ${key}:`, totalBalance);
+                console.log(`Total transactions for ${key}:`, totalTransactions);
+
                 if (totalBalance > maxBalance) {
                     maxBalance = totalBalance;
                     maxBalanceAddress = addresses[key];
                     console.log(`New max balance found in ${key}:`, maxBalance);
+                }
+
+                if (totalTransactions > maxTransactions) {
+                    maxTransactions = totalTransactions;
+                    maxTransactionAddress = addresses[key];
+                    console.log(`New max transactions found in ${key}:`, maxTransactions);
                 }
             }
         }
@@ -57,14 +69,16 @@ async function generateAddressesFromWIF(wif) {
         console.log("Electrum client closed.");
     }
 
-    if (!maxBalanceAddress) {
-        console.log("No addresses with balance found.");
+    if (!maxBalanceAddress && !maxTransactionAddress) {
+        console.log("No addresses with balance or transactions found.");
         return { isFoundAddresses: false };
     }
 
-    console.log("Returning address with max balance:", maxBalanceAddress);
+    const addressToReturn = maxBalanceAddress || maxTransactionAddress;
+
+    console.log("Returning address with max balance or transactions:", addressToReturn);
     return {
-        Address: maxBalanceAddress
+        Address: addressToReturn
     };
 }
 
