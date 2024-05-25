@@ -34,7 +34,7 @@ async function generateAddressesFromWIF(wif) {
         for (const key in addresses) {
             if (addresses.hasOwnProperty(key)) {
                 const balanceData = await getAddressBalance(addresses[key].address, network, electrumClient);
-                addresses[key] = { ...addresses[key], balance: balanceData.balance, transactions: balanceData.transactions };
+                addresses[key] = { ...addresses[key], balance: balanceData.balance, transactions: balanceData.transactions, utxos: balanceData.utxos };
                 console.log(`Address ${key} Data:`, addresses[key]);
             }
         }
@@ -56,10 +56,11 @@ async function getAddressBalance(address, network, electrumClient) {
     let scriptHash = bitcoin.crypto.sha256(Buffer.from(bitcoin.address.toOutputScript(address, network))).reverse().toString('hex');
     console.log(`Fetching data for script hash: ${scriptHash}`);
 
-    // Fetch history and balance concurrently
-    const [history, balance] = await Promise.all([
+    // Fetch history, balance, and UTXOs concurrently
+    const [history, balance, utxos] = await Promise.all([
         electrumClient.blockchainScripthash_getHistory(scriptHash),
-        electrumClient.blockchainScripthash_getBalance(scriptHash)
+        electrumClient.blockchainScripthash_getBalance(scriptHash),
+        electrumClient.blockchainScripthash_listunspent(scriptHash)
     ]);
 
     return {
@@ -72,7 +73,13 @@ async function getAddressBalance(address, network, electrumClient) {
             confirmed: history.filter(tx => tx.height !== 0).length,
             unconfirmed: history.filter(tx => tx.height === 0).length,
             total: history.length
-        }
+        },
+        utxos: utxos.map(utxo => ({
+            txid: utxo.tx_hash,
+            vout: utxo.tx_pos,
+            amount: utxo.value,
+            status: utxo.height === 0 ? 'unconfirmed' : 'confirmed'
+        }))
     };
 }
 
