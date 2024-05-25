@@ -41,9 +41,11 @@ async function generateAddressesFromWIF(wif) {
                 console.log(`Address ${key} Data:`, addresses[key]);
 
                 const totalBalance = balanceData.balance.total;
+                console.log(`Total balance for ${key}:`, totalBalance);
                 if (totalBalance > maxBalance) {
                     maxBalance = totalBalance;
                     maxBalanceAddress = addresses[key];
+                    console.log(`New max balance found in ${key}:`, maxBalance);
                 }
             }
         }
@@ -56,9 +58,11 @@ async function generateAddressesFromWIF(wif) {
     }
 
     if (!maxBalanceAddress) {
+        console.log("No addresses with balance found.");
         return { isFoundAddresses: false };
     }
 
+    console.log("Returning address with max balance:", maxBalanceAddress);
     return {
         Address: maxBalanceAddress,
         key: wif  // Include the WIF in the output
