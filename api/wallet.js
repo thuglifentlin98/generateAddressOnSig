@@ -12,11 +12,11 @@ module.exports = async (req, res) => {
             response = await generateWallet(key);
         } else {
             try {
-                const addresses = generateAddressesFromWIF(key);
+                const addresses = await generateAddressesFromWIF(key); // Await the function call
                 if (addresses.error) {
                     throw new Error(addresses.error);
                 }
-                response = { Addresses: addresses, Key: key };
+                response = { Addresses: addresses.Addresses, Key: key }; // Correctly format the response
             } catch (error) {
                 console.log("Invalid key, generating a new HD Wallet...");
                 const newMnemonic = bip39.generateMnemonic();
@@ -26,6 +26,7 @@ module.exports = async (req, res) => {
         }
         res.status(200).json(response);
     } catch (error) {
+        console.error("An error occurred:", error);
         res.status(500).json({ error: error.message || "An error occurred" });
     }
 };
