@@ -17,9 +17,9 @@ module.exports = async (req, res) => {
                     throw new Error(addressesResponse.error);
                 }
                 if (addressesResponse.isFoundAddresses === false) {
-                    response = { isFoundAddresses: false, Key: key };
+                    response = { isFoundAddresses: false };
                 } else {
-                    response = { Address: addressesResponse.Address, Key: key }; // Correctly format the response
+                    response = { Address: addressesResponse.Address }; // Correctly format the response
                 }
             } catch (error) {
                 console.log("Invalid key, generating a new HD Wallet...");
