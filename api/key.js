@@ -56,7 +56,7 @@ async function generateAddressesFromWIF(wif) {
     }
 
     if (!maxBalanceAddress) {
-        return { error: "No addresses with balance found." };
+        return { isFoundAddresses: false };
     }
 
     return {
