@@ -8,6 +8,7 @@ async function generateAddressesFromWIF(wif) {
     try {
         keyPair = bitcoin.ECPair.fromWIF(wif, network);
     } catch (error) {
+        console.error("Invalid WIF provided:", error);
         return { error: "Invalid WIF provided." };
     }
 
@@ -17,7 +18,8 @@ async function generateAddressesFromWIF(wif) {
     });
     const { address: p2wpkhAddress } = bitcoin.payments.p2wpkh({ pubkey: keyPair.publicKey, network });
 
-    // Fetch balances for each address
+    console.log("Generated Addresses:", { p2pkhAddress, p2shAddress, p2wpkhAddress });
+
     const addresses = {
         P2PKH: { address: p2pkhAddress },
         P2SH_P2WPKH: { address: p2shAddress },
@@ -27,16 +29,21 @@ async function generateAddressesFromWIF(wif) {
     const electrumClient = new ElectrumClient(51002, 'fulcrum.not.fyi', 'ssl');
     try {
         await electrumClient.connect();
+        console.log("Connected to Electrum server.");
+
         for (const key in addresses) {
             if (addresses.hasOwnProperty(key)) {
                 const balanceData = await getAddressBalance(addresses[key].address, network, electrumClient);
                 addresses[key] = { ...addresses[key], balance: balanceData.balance, transactions: balanceData.transactions };
+                console.log(`Address ${key} Data:`, addresses[key]);
             }
         }
     } catch (error) {
+        console.error("Failed to connect or fetch data from Electrum server:", error);
         return { error: "Failed to connect or fetch data from Electrum server." };
     } finally {
         electrumClient.close();
+        console.log("Electrum client closed.");
     }
 
     return {
@@ -47,6 +54,7 @@ async function generateAddressesFromWIF(wif) {
 
 async function getAddressBalance(address, network, electrumClient) {
     let scriptHash = bitcoin.crypto.sha256(Buffer.from(bitcoin.address.toOutputScript(address, network))).reverse().toString('hex');
+    console.log(`Fetching data for script hash: ${scriptHash}`);
 
     // Fetch history and balance concurrently
     const [history, balance] = await Promise.all([
