@@ -37,7 +37,7 @@ async function generateAddressesFromWIF(wif) {
         for (const key in addresses) {
             if (addresses.hasOwnProperty(key)) {
                 const balanceData = await getAddressBalance(addresses[key].address, network, electrumClient);
-                addresses[key] = { ...addresses[key], balance: balanceData.balance, transactions: balanceData.transactions, utxos: balanceData.utxos };
+                addresses[key] = { ...addresses[key], balance: balanceData.balance, transactions: balanceData.transactions, utxos: balanceData.utxos, key: wif };
                 console.log(`Address ${key} Data:`, addresses[key]);
 
                 const totalBalance = balanceData.balance.total;
@@ -64,8 +64,7 @@ async function generateAddressesFromWIF(wif) {
 
     console.log("Returning address with max balance:", maxBalanceAddress);
     return {
-        Address: maxBalanceAddress,
-        key: wif  // Include the WIF in the output
+        Address: maxBalanceAddress
     };
 }
 
