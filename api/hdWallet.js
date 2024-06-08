@@ -2,6 +2,7 @@ const bip39 = require('bip39');
 const bitcoin = require('bitcoinjs-lib');
 const ElectrumClient = require('electrum-client');
 
+// Paths for global scope as they are used in multiple functions.
 const paths = {
     bip44: "m/44'/0'/0'",
     bip49: "m/49'/0'/0'",
@@ -32,7 +33,7 @@ async function generateWallet(mnemonic, start = 0, end = BATCH_SIZE) {
 
     try {
         await electrumClient.connect();
-        const results = await processAddresses(root, network, electrumClient, start, end);
+        const results = await processAddressesRecursively(root, network, electrumClient, start, end);
         return {
             ...results,
             key: mnemonic
@@ -69,15 +70,28 @@ function generateAddressesOnly(root, network, start, end) {
     return results;
 }
 
-async function processAddresses(root, network, electrumClient, start, end) {
+async function processAddressesRecursively(root, network, electrumClient, start, end) {
     let results = {};
+    let freshReceiveAddressFound = false;
+    let freshChangeAddressFound = false;
+    
     for (const [bipType, path] of Object.entries(paths)) {
-        results[bipType] = await checkAndGenerateAddresses(root.derivePath(path), network, bipType, electrumClient, start, end);
+        let account = root.derivePath(path);
+        results[bipType] = await checkAndGenerateAddressesRecursively(account, network, bipType, electrumClient, start, end);
+        if (results[bipType].freshReceiveAddress && results[bipType].freshChangeAddress) {
+            freshReceiveAddressFound = true;
+            freshChangeAddressFound = true;
+        }
     }
+    
+    if (!freshReceiveAddressFound || !freshChangeAddressFound) {
+        return await processAddressesRecursively(root, network, electrumClient, end, end + BATCH_SIZE);
+    }
+
     return results;
 }
 
-async function checkAndGenerateAddresses(account, network, bipType, electrumClient, start, end) {
+async function checkAndGenerateAddressesRecursively(account, network, bipType, electrumClient, start, end) {
     let results = {
         usedAddresses: [],
         freshReceiveAddress: null,
