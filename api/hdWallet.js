@@ -84,20 +84,17 @@ async function checkAndGenerateAddresses(account, network, bipType, electrumClie
 
     let freshReceiveAddressFound = false;
     let freshChangeAddressFound = false;
-    let index = 0;
+    let batchSize = 100;
 
-    const checkAddressBatch = async (startIndex, batchSize) => {
+    while (!freshReceiveAddressFound || !freshChangeAddressFound) {
         const promises = [];
-        for (let i = startIndex; i < startIndex + batchSize; i++) {
+
+        for (let i = 0; i < batchSize; i++) {
             promises.push(checkAddress(account, i, 0, network, bipType, electrumClient));
             promises.push(checkAddress(account, i, 1, network, bipType, electrumClient));
         }
-        const resultsBatch = await Promise.all(promises);
-        return resultsBatch;
-    };
 
-    while (!freshReceiveAddressFound || !freshChangeAddressFound) {
-        const resultsBatch = await checkAddressBatch(index, 10);
+        const resultsBatch = await Promise.all(promises);
         resultsBatch.forEach((addressData, i) => {
             const chain = i % 2;
             if (addressData.transactions.total > 0) {
@@ -113,7 +110,12 @@ async function checkAndGenerateAddresses(account, network, bipType, electrumClie
             }
             results.totalBalance += addressData.balance.total;
         });
-        index += 10;
+
+        if (freshReceiveAddressFound && freshChangeAddressFound) {
+            break;
+        }
+
+        batchSize *= 2; // Double the batch size
     }
 
     return results;
