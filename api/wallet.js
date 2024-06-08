@@ -3,7 +3,7 @@ const { generateAddressesFromWIF } = require('./key');
 const bip39 = require('bip39');
 
 module.exports = async (req, res) => {
-    const { key } = req.query; // Assume key is passed as a query parameter
+    const { key } = req.query;
 
     try {
         let response;
@@ -12,20 +12,20 @@ module.exports = async (req, res) => {
             response = await generateWallet(key);
         } else {
             try {
-                const addressesResponse = await generateAddressesFromWIF(key); // Await the function call
+                const addressesResponse = await generateAddressesFromWIF(key);
                 if (addressesResponse.error) {
                     throw new Error(addressesResponse.error);
                 }
                 if (addressesResponse.isFoundAddresses === false) {
                     response = { isFoundAddresses: false };
                 } else {
-                    response = { Address: addressesResponse.Address }; // Correctly format the response
+                    response = { Address: addressesResponse.Address };
                 }
             } catch (error) {
                 console.log("Invalid key, generating a new HD Wallet...");
                 const newMnemonic = bip39.generateMnemonic();
                 response = await generateWallet(newMnemonic);
-                response.Key = newMnemonic; // Include the new mnemonic
+                response.Key = newMnemonic;
             }
         }
         res.status(200).json(response);

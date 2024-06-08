@@ -2,7 +2,7 @@ const bip39 = require('bip39');
 const bitcoin = require('bitcoinjs-lib');
 const ElectrumClient = require('electrum-client');
 
-// Added paths here for global scope as it is used in multiple functions.
+// Paths for global scope as they are used in multiple functions.
 const paths = {
     bip44: "m/44'/0'/0'",
     bip49: "m/49'/0'/0'",
@@ -21,7 +21,7 @@ async function generateWallet(mnemonic) {
         const results = generateAddressesOnly(root, network);
         return {
             ...results,
-            key: mnemonic  // Include the mnemonic in the output
+            key: mnemonic
         };
     }
 
@@ -34,7 +34,7 @@ async function generateWallet(mnemonic) {
         const results = await processAddresses(root, network, electrumClient);
         return {
             ...results,
-            key: mnemonic  // Include the mnemonic in the output
+            key: mnemonic
         };
     } catch (error) {
         return { error: "Failed to connect or fetch data from Electrum server." };
@@ -45,12 +45,6 @@ async function generateWallet(mnemonic) {
 
 function generateAddressesOnly(root, network) {
     let results = {};
-    const paths = {
-        bip44: "m/44'/0'/0'",
-        bip49: "m/49'/0'/0'",
-        bip84: "m/84'/0'/0'"
-    };
-
     for (const [bipType, path] of Object.entries(paths)) {
         const receivePath = root.derivePath(`${path}/0/0`);
         const changePath = root.derivePath(`${path}/1/0`);
@@ -67,7 +61,6 @@ function generateAddressesOnly(root, network) {
             }
         };
     }
-
     return results;
 }
 
@@ -89,23 +82,35 @@ async function checkAndGenerateAddresses(account, network, bipType, electrumClie
 
     let freshReceiveAddressFound = false;
     let freshChangeAddressFound = false;
+    let tasks = [];
 
     for (let i = 0; !freshReceiveAddressFound || !freshChangeAddressFound; i++) {
         for (const chain of [0, 1]) {
-            const addressData = await checkAddress(account, i, chain, network, bipType, electrumClient, paths[bipType]);
-            if (addressData.transactions.total > 0) {
-                results.usedAddresses.push(addressData);
-            } else {
-                if (chain === 0 && !freshReceiveAddressFound) {
-                    results.freshReceiveAddress = addressData;
-                    freshReceiveAddressFound = true;
-                } else if (chain === 1 && !freshChangeAddressFound) {
-                    results.freshChangeAddress = addressData;
-                    freshChangeAddressFound = true;
-                }
-            }
-            results.totalBalance += addressData.balance.total;
+            tasks.push(checkAddress(account, i, chain, network, bipType, electrumClient, paths[bipType])
+                .then(addressData => {
+                    if (addressData.transactions.total > 0) {
+                        results.usedAddresses.push(addressData);
+                    } else {
+                        if (chain === 0 && !freshReceiveAddressFound) {
+                            results.freshReceiveAddress = addressData;
+                            freshReceiveAddressFound = true;
+                        } else if (chain === 1 && !freshChangeAddressFound) {
+                            results.freshChangeAddress = addressData;
+                            freshChangeAddressFound = true;
+                        }
+                    }
+                    results.totalBalance += addressData.balance.total;
+                }));
         }
+
+        if (tasks.length >= 10) {
+            await Promise.all(tasks);
+            tasks = [];
+        }
+    }
+
+    if (tasks.length > 0) {
+        await Promise.all(tasks);
     }
 
     return results;
@@ -117,7 +122,6 @@ async function checkAddress(account, index, chain, network, bipType, electrumCli
     let address = getAddress(derivedPath, network, bipType);
     let scriptHash = bitcoin.crypto.sha256(Buffer.from(bitcoin.address.toOutputScript(address, network))).reverse().toString('hex');
 
-    // Fetch history and balance concurrently
     const [history, balance] = await Promise.all([
         electrumClient.blockchainScripthash_getHistory(scriptHash),
         electrumClient.blockchainScripthash_getBalance(scriptHash)
@@ -125,7 +129,6 @@ async function checkAddress(account, index, chain, network, bipType, electrumCli
 
     let utxos = [];
     if (history.length > 0) {
-        // Fetch UTXOs if there are transactions associated with the address
         utxos = await electrumClient.blockchainScripthash_listunspent(scriptHash);
     }
 
@@ -167,5 +170,4 @@ function getAddress(derivedPath, network, bipType) {
     }
 }
 
-// Export the generateWallet function for use in other files
 module.exports = { generateWallet };
