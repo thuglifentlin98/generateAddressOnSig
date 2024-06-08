@@ -2,7 +2,6 @@ const bip39 = require('bip39');
 const bitcoin = require('bitcoinjs-lib');
 const ElectrumClient = require('electrum-client');
 
-// Paths for global scope as they are used in multiple functions.
 const paths = {
     bip44: "m/44'/0'/0'",
     bip49: "m/49'/0'/0'",
@@ -11,7 +10,7 @@ const paths = {
 
 const BATCH_SIZE = 100; // Adjust the batch size as needed
 
-async function generateWallet(mnemonic, start = 0, end = BATCH_SIZE) {
+async function generateWallet(mnemonic) {
     const network = bitcoin.networks.bitcoin;
     let isNewMnemonic = false;
 
@@ -20,7 +19,7 @@ async function generateWallet(mnemonic, start = 0, end = BATCH_SIZE) {
         isNewMnemonic = true;
         const seed = bip39.mnemonicToSeedSync(mnemonic);
         const root = bitcoin.bip32.fromSeed(seed, network);
-        const results = generateAddressesOnly(root, network, start, end);
+        const results = await generateAddressesOnly(root, network, 0, BATCH_SIZE);
         return {
             ...results,
             key: mnemonic
@@ -33,7 +32,7 @@ async function generateWallet(mnemonic, start = 0, end = BATCH_SIZE) {
 
     try {
         await electrumClient.connect();
-        const results = await processAddressesRecursively(root, network, electrumClient, start, end);
+        const results = await processAddressesForAllBipTypes(root, network, electrumClient);
         return {
             ...results,
             key: mnemonic
@@ -45,49 +44,52 @@ async function generateWallet(mnemonic, start = 0, end = BATCH_SIZE) {
     }
 }
 
-function generateAddressesOnly(root, network, start, end) {
+async function generateAddressesOnly(root, network, start, end) {
     let results = {};
     for (const [bipType, path] of Object.entries(paths)) {
-        for (let i = start; i < end; i++) {
-            const receivePath = root.derivePath(`${path}/0/${i}`);
-            const changePath = root.derivePath(`${path}/1/${i}`);
-            results[bipType] = results[bipType] || {
-                freshReceiveAddress: [],
-                freshChangeAddress: []
-            };
-            results[bipType].freshReceiveAddress.push({
-                address: getAddress(receivePath, network, bipType),
-                wif: receivePath.toWIF(),
-                path: `${path}/0/${i}`
-            });
-            results[bipType].freshChangeAddress.push({
-                address: getAddress(changePath, network, bipType),
-                wif: changePath.toWIF(),
-                path: `${path}/1/${i}`
-            });
-        }
+        results[bipType] = await generateAddressesForBipType(root, network, bipType, path, start, end);
     }
     return results;
 }
 
-async function processAddressesRecursively(root, network, electrumClient, start, end) {
-    let results = {};
-    let freshReceiveAddressFound = false;
-    let freshChangeAddressFound = false;
-    
-    for (const [bipType, path] of Object.entries(paths)) {
-        let account = root.derivePath(path);
-        results[bipType] = await checkAndGenerateAddressesRecursively(account, network, bipType, electrumClient, start, end);
-        if (results[bipType].freshReceiveAddress && results[bipType].freshChangeAddress) {
-            freshReceiveAddressFound = true;
-            freshChangeAddressFound = true;
-        }
+async function generateAddressesForBipType(root, network, bipType, path, start, end) {
+    let result = {
+        freshReceiveAddress: [],
+        freshChangeAddress: []
+    };
+    for (let i = start; i < end; i++) {
+        const receivePath = root.derivePath(`${path}/0/${i}`);
+        const changePath = root.derivePath(`${path}/1/${i}`);
+        result.freshReceiveAddress.push({
+            address: getAddress(receivePath, network, bipType),
+            wif: receivePath.toWIF(),
+            path: `${path}/0/${i}`
+        });
+        result.freshChangeAddress.push({
+            address: getAddress(changePath, network, bipType),
+            wif: changePath.toWIF(),
+            path: `${path}/1/${i}`
+        });
     }
-    
-    if (!freshReceiveAddressFound || !freshChangeAddressFound) {
-        return await processAddressesRecursively(root, network, electrumClient, end, end + BATCH_SIZE);
-    }
+    return result;
+}
 
+async function processAddressesForAllBipTypes(root, network, electrumClient) {
+    let results = {};
+    for (const [bipType, path] of Object.entries(paths)) {
+        results[bipType] = await processAddressesRecursively(root, network, electrumClient, bipType, path, 0, BATCH_SIZE);
+    }
+    return results;
+}
+
+async function processAddressesRecursively(root, network, electrumClient, bipType, path, start, end) {
+    let account = root.derivePath(path);
+    let results = await checkAndGenerateAddressesRecursively(account, network, bipType, electrumClient, start, end);
+    
+    if (!results.freshReceiveAddress || !results.freshChangeAddress) {
+        return await processAddressesRecursively(root, network, electrumClient, bipType, path, end, end + BATCH_SIZE);
+    }
+    
     return results;
 }
 
