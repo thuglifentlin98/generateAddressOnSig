@@ -18,8 +18,6 @@ async function generateAddressesFromWIF(wif) {
     });
     const { address: p2wpkhAddress } = bitcoin.payments.p2wpkh({ pubkey: keyPair.publicKey, network });
 
-    console.log("Generated Addresses:", { p2pkhAddress, p2shAddress, p2wpkhAddress });
-
     const addresses = {
         P2PKH: { address: p2pkhAddress },
         P2SH_P2WPKH: { address: p2shAddress },
@@ -32,7 +30,6 @@ async function generateAddressesFromWIF(wif) {
 
     try {
         await electrumClient.connect();
-        console.log("Connected to Electrum server.");
 
         let maxBalance = 0;
         let maxTransactions = 0;
@@ -41,17 +38,13 @@ async function generateAddressesFromWIF(wif) {
             if (addresses.hasOwnProperty(key)) {
                 const balanceData = await getAddressBalance(addresses[key].address, network, electrumClient);
                 addresses[key] = { ...addresses[key], balance: balanceData.balance, transactions: balanceData.transactions, utxos: balanceData.utxos, key: wif };
-                console.log(`Address ${key} Data:`, addresses[key]);
 
                 const totalBalance = balanceData.balance.total;
                 const totalTransactions = balanceData.transactions.total;
-                console.log(`Total balance for ${key}:`, totalBalance);
-                console.log(`Total transactions for ${key}:`, totalTransactions);
 
                 if (totalBalance > maxBalance) {
                     maxBalance = totalBalance;
                     maxBalanceAddress = addresses[key];
-                    console.log(`New max balance found in ${key}:`, maxBalance);
                 }
 
                 if (totalTransactions > maxTransactions) {

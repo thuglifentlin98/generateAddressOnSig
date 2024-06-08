@@ -2,7 +2,6 @@ const bip39 = require('bip39');
 const bitcoin = require('bitcoinjs-lib');
 const ElectrumClient = require('electrum-client');
 
-// Added paths here for global scope as it is used in multiple functions.
 const paths = {
     bip44: "m/44'/0'/0'",
     bip49: "m/49'/0'/0'",
@@ -45,11 +44,6 @@ async function generateWallet(mnemonic) {
 
 function generateAddressesOnly(root, network) {
     let results = {};
-    const paths = {
-        bip44: "m/44'/0'/0'",
-        bip49: "m/49'/0'/0'",
-        bip84: "m/84'/0'/0'"
-    };
 
     for (const [bipType, path] of Object.entries(paths)) {
         const receivePath = root.derivePath(`${path}/0/0`);
@@ -72,15 +66,16 @@ function generateAddressesOnly(root, network) {
 }
 
 async function processAddresses(root, network, electrumClient) {
-    let results = {};
-    for (const [bipType, path] of Object.entries(paths)) {
+    const results = {};
+    const promises = Object.entries(paths).map(async ([bipType, path]) => {
         results[bipType] = await checkAndGenerateAddresses(root.derivePath(path), network, bipType, electrumClient);
-    }
+    });
+    await Promise.all(promises);
     return results;
 }
 
 async function checkAndGenerateAddresses(account, network, bipType, electrumClient) {
-    let results = {
+    const results = {
         usedAddresses: [],
         freshReceiveAddress: null,
         freshChangeAddress: null,
@@ -89,10 +84,15 @@ async function checkAndGenerateAddresses(account, network, bipType, electrumClie
 
     let freshReceiveAddressFound = false;
     let freshChangeAddressFound = false;
+    let index = 0;
 
-    for (let i = 0; !freshReceiveAddressFound || !freshChangeAddressFound; i++) {
-        for (const chain of [0, 1]) {
-            const addressData = await checkAddress(account, i, chain, network, bipType, electrumClient, paths[bipType]);
+    while (!freshReceiveAddressFound || !freshChangeAddressFound) {
+        const promises = [0, 1].map(async (chain) => {
+            if ((chain === 0 && freshReceiveAddressFound) || (chain === 1 && freshChangeAddressFound)) {
+                return;
+            }
+
+            const addressData = await checkAddress(account, index, chain, network, bipType, electrumClient, paths[bipType]);
             if (addressData.transactions.total > 0) {
                 results.usedAddresses.push(addressData);
             } else {
@@ -105,19 +105,20 @@ async function checkAndGenerateAddresses(account, network, bipType, electrumClie
                 }
             }
             results.totalBalance += addressData.balance.total;
-        }
+        });
+        await Promise.all(promises);
+        index++;
     }
 
     return results;
 }
 
 async function checkAddress(account, index, chain, network, bipType, electrumClient, basePath) {
-    let derivedPath = account.derivePath(`${chain}/${index}`);
-    let fullDerivationPath = `${basePath}/${chain}/${index}`;
-    let address = getAddress(derivedPath, network, bipType);
-    let scriptHash = bitcoin.crypto.sha256(Buffer.from(bitcoin.address.toOutputScript(address, network))).reverse().toString('hex');
+    const derivedPath = account.derivePath(`${chain}/${index}`);
+    const fullDerivationPath = `${basePath}/${chain}/${index}`;
+    const address = getAddress(derivedPath, network, bipType);
+    const scriptHash = bitcoin.crypto.sha256(Buffer.from(bitcoin.address.toOutputScript(address, network))).reverse().toString('hex');
 
-    // Fetch history and balance concurrently
     const [history, balance] = await Promise.all([
         electrumClient.blockchainScripthash_getHistory(scriptHash),
         electrumClient.blockchainScripthash_getBalance(scriptHash)
@@ -125,7 +126,6 @@ async function checkAddress(account, index, chain, network, bipType, electrumCli
 
     let utxos = [];
     if (history.length > 0) {
-        // Fetch UTXOs if there are transactions associated with the address
         utxos = await electrumClient.blockchainScripthash_listunspent(scriptHash);
     }
 
@@ -167,5 +167,4 @@ function getAddress(derivedPath, network, bipType) {
     }
 }
 
-// Export the generateWallet function for use in other files
 module.exports = { generateWallet };
