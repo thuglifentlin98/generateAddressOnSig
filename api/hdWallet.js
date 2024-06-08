@@ -1,7 +1,7 @@
 const bip39 = require('bip39');
 const bitcoin = require('bitcoinjs-lib');
 const ElectrumClient = require('electrum-client');
-const b58 = require('bs58check');
+const generatePubKeys = require('./generatePUB');
 
 const paths = {
     bip44: "m/44'/0'/0'",
@@ -27,6 +27,11 @@ async function generateWallet(mnemonic) {
         };
     }
 
+    const pubKeys = generatePubKeys(mnemonic);
+    if (!pubKeys) {
+        return { error: "Invalid mnemonic." };
+    }
+
     const seed = bip39.mnemonicToSeedSync(mnemonic);
     const root = bitcoin.bip32.fromSeed(seed, network);
     const electrumClient = new ElectrumClient(51002, 'fulcrum.not.fyi', 'ssl');
@@ -36,9 +41,11 @@ async function generateWallet(mnemonic) {
         const results = await processAddressesForAllBipTypes(root, network, electrumClient);
         return {
             ...results,
-            key: mnemonic
+            key: mnemonic,
+            pubKeys
         };
     } catch (error) {
+        console.error('Electrum client error:', error); // Log the error
         return { error: "Failed to connect or fetch data from Electrum server." };
     } finally {
         electrumClient.close();
@@ -56,10 +63,7 @@ async function generateAddressesOnly(root, network, start, end) {
 async function generateAddressesForBipType(root, network, bipType, path, start, end) {
     let result = {
         freshReceiveAddress: [],
-        freshChangeAddress: [],
-        xpub: '',
-        ypub: '',
-        zpub: ''
+        freshChangeAddress: []
     };
     for (let i = start; i < end; i++) {
         const receivePath = root.derivePath(`${path}/0/${i}`);
@@ -75,9 +79,6 @@ async function generateAddressesForBipType(root, network, bipType, path, start, 
             path: `${path}/1/${i}`
         });
     }
-    result.xpub = root.derivePath(path).neutered().toBase58();
-    result.ypub = convertToYPub(result.xpub);
-    result.zpub = convertToZPub(result.xpub);
     return result;
 }
 
@@ -100,10 +101,6 @@ async function processAddressesRecursively(root, network, electrumClient, bipTyp
         if (!results.freshReceiveAddress) results.freshReceiveAddress = nextBatchResults.freshReceiveAddress;
         if (!results.freshChangeAddress) results.freshChangeAddress = nextBatchResults.freshChangeAddress;
     }
-
-    results.xpub = root.derivePath(path).neutered().toBase58();
-    results.ypub = convertToYPub(results.xpub);
-    results.zpub = convertToZPub(results.xpub);
 
     return results;
 }
@@ -199,18 +196,6 @@ function getAddress(derivedPath, network, bipType) {
         default:
             throw new Error('Unsupported BIP type');
     }
-}
-
-function convertToYPub(xpub) {
-    const data = b58.decode(xpub);
-    data.writeUInt32BE(0x049d7cb2, 0); // ypub version bytes
-    return b58.encode(data);
-}
-
-function convertToZPub(xpub) {
-    const data = b58.decode(xpub);
-    data.writeUInt32BE(0x04b24746, 0); // zpub version bytes
-    return b58.encode(data);
 }
 
 module.exports = { generateWallet };
