@@ -8,7 +8,7 @@ const paths = {
     bip84: "m/84'/0'/0'"
 };
 
-const BATCH_SIZE = 100; // Adjust the batch size as needed
+const BATCH_SIZE = 300; // Adjust the batch size as needed
 
 async function generateWallet(mnemonic) {
     const network = bitcoin.networks.bitcoin;
