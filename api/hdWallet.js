@@ -2,14 +2,15 @@ const bip39 = require('bip39');
 const bitcoin = require('bitcoinjs-lib');
 const ElectrumClient = require('electrum-client');
 
-// Paths for global scope as they are used in multiple functions.
 const paths = {
     bip44: "m/44'/0'/0'",
     bip49: "m/49'/0'/0'",
     bip84: "m/84'/0'/0'"
 };
 
-async function generateWallet(mnemonic) {
+const BATCH_SIZE = 100; // Adjust the batch size as needed
+
+async function generateWallet(mnemonic, start = 0, end = BATCH_SIZE) {
     const network = bitcoin.networks.bitcoin;
     let isNewMnemonic = false;
 
@@ -18,7 +19,7 @@ async function generateWallet(mnemonic) {
         isNewMnemonic = true;
         const seed = bip39.mnemonicToSeedSync(mnemonic);
         const root = bitcoin.bip32.fromSeed(seed, network);
-        const results = generateAddressesOnly(root, network);
+        const results = generateAddressesOnly(root, network, start, end);
         return {
             ...results,
             key: mnemonic
@@ -31,7 +32,7 @@ async function generateWallet(mnemonic) {
 
     try {
         await electrumClient.connect();
-        const results = await processAddresses(root, network, electrumClient);
+        const results = await processAddresses(root, network, electrumClient, start, end);
         return {
             ...results,
             key: mnemonic
@@ -43,36 +44,40 @@ async function generateWallet(mnemonic) {
     }
 }
 
-function generateAddressesOnly(root, network) {
+function generateAddressesOnly(root, network, start, end) {
     let results = {};
     for (const [bipType, path] of Object.entries(paths)) {
-        const receivePath = root.derivePath(`${path}/0/0`);
-        const changePath = root.derivePath(`${path}/1/0`);
-        results[bipType] = {
-            freshReceiveAddress: {
+        for (let i = start; i < end; i++) {
+            const receivePath = root.derivePath(`${path}/0/${i}`);
+            const changePath = root.derivePath(`${path}/1/${i}`);
+            results[bipType] = results[bipType] || {
+                freshReceiveAddress: [],
+                freshChangeAddress: []
+            };
+            results[bipType].freshReceiveAddress.push({
                 address: getAddress(receivePath, network, bipType),
                 wif: receivePath.toWIF(),
-                path: `${path}/0/0`
-            },
-            freshChangeAddress: {
+                path: `${path}/0/${i}`
+            });
+            results[bipType].freshChangeAddress.push({
                 address: getAddress(changePath, network, bipType),
                 wif: changePath.toWIF(),
-                path: `${path}/1/0`
-            }
-        };
+                path: `${path}/1/${i}`
+            });
+        }
     }
     return results;
 }
 
-async function processAddresses(root, network, electrumClient) {
+async function processAddresses(root, network, electrumClient, start, end) {
     let results = {};
     for (const [bipType, path] of Object.entries(paths)) {
-        results[bipType] = await checkAndGenerateAddresses(root.derivePath(path), network, bipType, electrumClient);
+        results[bipType] = await checkAndGenerateAddresses(root.derivePath(path), network, bipType, electrumClient, start, end);
     }
     return results;
 }
 
-async function checkAndGenerateAddresses(account, network, bipType, electrumClient) {
+async function checkAndGenerateAddresses(account, network, bipType, electrumClient, start, end) {
     let results = {
         usedAddresses: [],
         freshReceiveAddress: null,
@@ -80,23 +85,18 @@ async function checkAndGenerateAddresses(account, network, bipType, electrumClie
         totalBalance: 0
     };
 
-    let freshReceiveAddressFound = false;
-    let freshChangeAddressFound = false;
     let tasks = [];
-
-    for (let i = 0; !freshReceiveAddressFound || !freshChangeAddressFound; i++) {
+    for (let i = start; i < end; i++) {
         for (const chain of [0, 1]) {
             tasks.push(checkAddress(account, i, chain, network, bipType, electrumClient, paths[bipType])
                 .then(addressData => {
                     if (addressData.transactions.total > 0) {
                         results.usedAddresses.push(addressData);
                     } else {
-                        if (chain === 0 && !freshReceiveAddressFound) {
+                        if (chain === 0 && !results.freshReceiveAddress) {
                             results.freshReceiveAddress = addressData;
-                            freshReceiveAddressFound = true;
-                        } else if (chain === 1 && !freshChangeAddressFound) {
+                        } else if (chain === 1 && !results.freshChangeAddress) {
                             results.freshChangeAddress = addressData;
-                            freshChangeAddressFound = true;
                         }
                     }
                     results.totalBalance += addressData.balance.total;
