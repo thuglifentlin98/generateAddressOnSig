@@ -1,6 +1,7 @@
 const bip39 = require('bip39');
 const bitcoin = require('bitcoinjs-lib');
 const ElectrumClient = require('electrum-client');
+const b58 = require('bs58check');
 
 const paths = {
     bip44: "m/44'/0'/0'",
@@ -55,7 +56,10 @@ async function generateAddressesOnly(root, network, start, end) {
 async function generateAddressesForBipType(root, network, bipType, path, start, end) {
     let result = {
         freshReceiveAddress: [],
-        freshChangeAddress: []
+        freshChangeAddress: [],
+        xpub: '',
+        ypub: '',
+        zpub: ''
     };
     for (let i = start; i < end; i++) {
         const receivePath = root.derivePath(`${path}/0/${i}`);
@@ -71,6 +75,9 @@ async function generateAddressesForBipType(root, network, bipType, path, start, 
             path: `${path}/1/${i}`
         });
     }
+    result.xpub = root.derivePath(path).neutered().toBase58();
+    result.ypub = convertToYPub(result.xpub);
+    result.zpub = convertToZPub(result.xpub);
     return result;
 }
 
@@ -93,6 +100,10 @@ async function processAddressesRecursively(root, network, electrumClient, bipTyp
         if (!results.freshReceiveAddress) results.freshReceiveAddress = nextBatchResults.freshReceiveAddress;
         if (!results.freshChangeAddress) results.freshChangeAddress = nextBatchResults.freshChangeAddress;
     }
+
+    results.xpub = root.derivePath(path).neutered().toBase58();
+    results.ypub = convertToYPub(results.xpub);
+    results.zpub = convertToZPub(results.xpub);
 
     return results;
 }
@@ -188,6 +199,18 @@ function getAddress(derivedPath, network, bipType) {
         default:
             throw new Error('Unsupported BIP type');
     }
+}
+
+function convertToYPub(xpub) {
+    const data = b58.decode(xpub);
+    data.writeUInt32BE(0x049d7cb2, 0); // ypub version bytes
+    return b58.encode(data);
+}
+
+function convertToZPub(xpub) {
+    const data = b58.decode(xpub);
+    data.writeUInt32BE(0x04b24746, 0); // zpub version bytes
+    return b58.encode(data);
 }
 
 module.exports = { generateWallet };

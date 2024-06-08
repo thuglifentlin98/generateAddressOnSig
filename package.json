@@ -3,6 +3,7 @@
     "bip32": "^4.0.0",
     "bip39": "^3.1.0",
     "bitcoinjs-lib": "^5.2.0",
+    "bs58check": "^3.0.1",
     "electrum-client": "^0.0.6"
   }
 }
