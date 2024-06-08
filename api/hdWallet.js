@@ -86,13 +86,20 @@ async function checkAndGenerateAddresses(account, network, bipType, electrumClie
     let freshChangeAddressFound = false;
     let index = 0;
 
-    while (!freshReceiveAddressFound || !freshChangeAddressFound) {
-        const promises = [0, 1].map(async (chain) => {
-            if ((chain === 0 && freshReceiveAddressFound) || (chain === 1 && freshChangeAddressFound)) {
-                return;
-            }
+    const checkAddressBatch = async (startIndex, batchSize) => {
+        const promises = [];
+        for (let i = startIndex; i < startIndex + batchSize; i++) {
+            promises.push(checkAddress(account, i, 0, network, bipType, electrumClient));
+            promises.push(checkAddress(account, i, 1, network, bipType, electrumClient));
+        }
+        const resultsBatch = await Promise.all(promises);
+        return resultsBatch;
+    };
 
-            const addressData = await checkAddress(account, index, chain, network, bipType, electrumClient, paths[bipType]);
+    while (!freshReceiveAddressFound || !freshChangeAddressFound) {
+        const resultsBatch = await checkAddressBatch(index, 10);
+        resultsBatch.forEach((addressData, i) => {
+            const chain = i % 2;
             if (addressData.transactions.total > 0) {
                 results.usedAddresses.push(addressData);
             } else {
@@ -106,16 +113,15 @@ async function checkAndGenerateAddresses(account, network, bipType, electrumClie
             }
             results.totalBalance += addressData.balance.total;
         });
-        await Promise.all(promises);
-        index++;
+        index += 10;
     }
 
     return results;
 }
 
-async function checkAddress(account, index, chain, network, bipType, electrumClient, basePath) {
+async function checkAddress(account, index, chain, network, bipType, electrumClient) {
     const derivedPath = account.derivePath(`${chain}/${index}`);
-    const fullDerivationPath = `${basePath}/${chain}/${index}`;
+    const fullDerivationPath = `${paths[bipType]}/${chain}/${index}`;
     const address = getAddress(derivedPath, network, bipType);
     const scriptHash = bitcoin.crypto.sha256(Buffer.from(bitcoin.address.toOutputScript(address, network))).reverse().toString('hex');
 
