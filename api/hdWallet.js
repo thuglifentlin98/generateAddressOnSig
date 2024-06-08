@@ -8,7 +8,7 @@ const paths = {
     bip84: "m/84'/0'/0'"
 };
 
-const BATCH_SIZE = 300; // Adjust the batch size as needed
+const BATCH_SIZE = 100; // Adjust the batch size as needed
 
 async function generateWallet(mnemonic) {
     const network = bitcoin.networks.bitcoin;
@@ -85,11 +85,15 @@ async function processAddressesForAllBipTypes(root, network, electrumClient) {
 async function processAddressesRecursively(root, network, electrumClient, bipType, path, start, end) {
     let account = root.derivePath(path);
     let results = await checkAndGenerateAddressesRecursively(account, network, bipType, electrumClient, start, end);
-    
+
     if (!results.freshReceiveAddress || !results.freshChangeAddress) {
-        return await processAddressesRecursively(root, network, electrumClient, bipType, path, end, end + BATCH_SIZE);
+        const nextBatchResults = await processAddressesRecursively(root, network, electrumClient, bipType, path, end, end + BATCH_SIZE);
+        results.usedAddresses.push(...nextBatchResults.usedAddresses);
+        results.totalBalance += nextBatchResults.totalBalance;
+        if (!results.freshReceiveAddress) results.freshReceiveAddress = nextBatchResults.freshReceiveAddress;
+        if (!results.freshChangeAddress) results.freshChangeAddress = nextBatchResults.freshChangeAddress;
     }
-    
+
     return results;
 }
 
