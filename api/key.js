@@ -1,6 +1,29 @@
 const bitcoin = require('bitcoinjs-lib');
 const ElectrumClient = require('electrum-client');
 
+const electrumServers = [
+    { host: 'fulcrum.sethforprivacy.com', port: 50002, protocol: 'ssl' },
+    { host: 'mempool.blocktrainer.de', port: 50002, protocol: 'ssl' },
+    { host: 'fulcrum.grey.pw', port: 51002, protocol: 'ssl' },
+    { host: 'fortress.qtornado.com', port: 50002, protocol: 'ssl' },
+    { host: 'electrumx-core.1209k.com', port: 50002, protocol: 'ssl' },
+    { host: 'pipedream.fiatfaucet.com', port: 50002, protocol: 'ssl' },
+];
+
+const connectToElectrumServer = async () => {
+    for (const server of electrumServers) {
+        const client = new ElectrumClient(server.port, server.host, server.protocol);
+        try {
+            await client.connect();
+            console.log(`Connected to Electrum server ${server.host}`);
+            return client;
+        } catch (error) {
+            console.error(`Failed to connect to Electrum server ${server.host}:`, error);
+        }
+    }
+    throw new Error('All Electrum servers failed to connect');
+};
+
 async function generateAddressesFromWIF(wif) {
     const network = bitcoin.networks.bitcoin;
     let keyPair;
@@ -26,12 +49,12 @@ async function generateAddressesFromWIF(wif) {
         P2WPKH: { address: p2wpkhAddress }
     };
 
-    const electrumClient = new ElectrumClient(51002, 'fulcrum.not.fyi', 'ssl');
+    let client;
     let maxBalanceAddress = null;
     let maxTransactionAddress = null;
 
     try {
-        await electrumClient.connect();
+        client = await connectToElectrumServer();
         console.log("Connected to Electrum server.");
 
         let maxBalance = 0;
@@ -39,7 +62,7 @@ async function generateAddressesFromWIF(wif) {
 
         for (const key in addresses) {
             if (addresses.hasOwnProperty(key)) {
-                const balanceData = await getAddressBalance(addresses[key].address, network, electrumClient);
+                const balanceData = await getAddressBalance(addresses[key].address, network, client);
                 addresses[key] = { ...addresses[key], balance: balanceData.balance, transactions: balanceData.transactions, utxos: balanceData.utxos, key: wif };
                 console.log(`Address ${key} Data:`, addresses[key]);
 
@@ -65,8 +88,10 @@ async function generateAddressesFromWIF(wif) {
         console.error("Failed to connect or fetch data from Electrum server:", error);
         return { error: "Failed to connect or fetch data from Electrum server." };
     } finally {
-        electrumClient.close();
-        console.log("Electrum client closed.");
+        if (client) {
+            await client.close();
+            console.log("Electrum client closed.");
+        }
     }
 
     if (!maxBalanceAddress && !maxTransactionAddress) {
