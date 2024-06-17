@@ -10,6 +10,28 @@ const paths = {
 };
 
 const BATCH_SIZE = 100; // Adjust the batch size as needed
+const electrumServers = [
+    { host: 'fulcrum.sethforprivacy.com', port: 50002, protocol: 'ssl' },
+    { host: 'mempool.blocktrainer.de', port: 50002, protocol: 'ssl' },
+    { host: 'fulcrum.grey.pw', port: 51002, protocol: 'ssl' },
+    { host: 'fortress.qtornado.com', port: 50002, protocol: 'ssl' },
+    { host: 'electrumx-core.1209k.com', port: 50002, protocol: 'ssl' },
+    { host: 'pipedream.fiatfaucet.com', port: 50002, protocol: 'ssl' },
+    // Add more servers as needed
+];
+
+async function connectToElectrumServer() {
+    for (const server of electrumServers) {
+        const electrumClient = new ElectrumClient(server.port, server.host, server.protocol);
+        try {
+            await electrumClient.connect();
+            return electrumClient;
+        } catch (error) {
+            console.error(`Failed to connect to Electrum server ${server.host}:`, error);
+        }
+    }
+    throw new Error('All Electrum servers failed to connect');
+}
 
 async function generateWallet(mnemonic) {
     const network = bitcoin.networks.bitcoin;
@@ -34,10 +56,9 @@ async function generateWallet(mnemonic) {
 
     const seed = bip39.mnemonicToSeedSync(mnemonic);
     const root = bitcoin.bip32.fromSeed(seed, network);
-    const electrumClient = new ElectrumClient(50002, 'mempool.blocktrainer.de', 'ssl');
-
+    let electrumClient;
     try {
-        await electrumClient.connect();
+        electrumClient = await connectToElectrumServer();
         const results = await processAddressesForAllBipTypes(root, network, electrumClient);
         return {
             ...results,
@@ -46,9 +67,11 @@ async function generateWallet(mnemonic) {
         };
     } catch (error) {
         console.error('Electrum client error:', error); // Log the error
-        return { error: "Failed to connect or fetch data from Electrum server." };
+        return { error: "Failed to connect or fetch data from any Electrum server." };
     } finally {
-        electrumClient.close();
+        if (electrumClient) {
+            electrumClient.close();
+        }
     }
 }
 
