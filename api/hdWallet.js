@@ -34,7 +34,7 @@ async function generateWallet(mnemonic) {
 
     const seed = bip39.mnemonicToSeedSync(mnemonic);
     const root = bitcoin.bip32.fromSeed(seed, network);
-    const electrumClient = new ElectrumClient(51002, 'fulcrum.not.fyi', 'ssl');
+    const electrumClient = new ElectrumClient(50002, 'mempool.blocktrainer.de', 'ssl');
 
     try {
         await electrumClient.connect();
