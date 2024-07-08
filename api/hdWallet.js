@@ -2,6 +2,7 @@ const bip39 = require('bip39');
 const bitcoin = require('bitcoinjs-lib');
 const ElectrumClient = require('electrum-client');
 const generatePubKeys = require('./generatePUB');
+const async = require('async');
 
 const paths = {
     bip44: "m/44'/0'/0'",
@@ -124,24 +125,29 @@ async function checkAndGenerateAddresses(account, network, bipType, electrumClie
     let receiveUnused = false;
     let changeUnused = false;
 
+    const tasks = [];
     for (let i = start; i < start + batchSize; i++) {
         for (const chain of [0, 1]) {
-            const addressData = await checkAddress(account, i, chain, network, bipType, electrumClient, paths[bipType]);
-            if (addressData.transactions.total > 0) {
-                results.usedAddresses.push(addressData);
-            } else {
-                if (chain === 0 && !receiveUnused) {
-                    results.freshReceiveAddress = addressData;
-                    receiveUnused = true;
+            tasks.push(async () => {
+                const addressData = await checkAddress(account, i, chain, network, bipType, electrumClient, paths[bipType]);
+                if (addressData.transactions.total > 0) {
+                    results.usedAddresses.push(addressData);
+                } else {
+                    if (chain === 0 && !receiveUnused) {
+                        results.freshReceiveAddress = addressData;
+                        receiveUnused = true;
+                    }
+                    if (chain === 1 && !changeUnused) {
+                        results.freshChangeAddress = addressData;
+                        changeUnused = true;
+                    }
                 }
-                if (chain === 1 && !changeUnused) {
-                    results.freshChangeAddress = addressData;
-                    changeUnused = true;
-                }
-            }
-            results.totalBalance += addressData.balance.total;
+                results.totalBalance += addressData.balance.total;
+            });
         }
     }
+
+    await async.parallelLimit(tasks, 10); // Adjust the concurrency level as needed
 
     return results;
 }
