@@ -2,7 +2,6 @@ const bip39 = require('bip39');
 const bitcoin = require('bitcoinjs-lib');
 const ElectrumClient = require('electrum-client');
 const generatePubKeys = require('./generatePUB');
-const async = require('async');
 
 const paths = {
     bip44: "m/44'/0'/0'",
@@ -128,8 +127,7 @@ async function checkAndGenerateAddresses(account, network, bipType, electrumClie
     const tasks = [];
     for (let i = start; i < start + batchSize; i++) {
         for (const chain of [0, 1]) {
-            tasks.push(async () => {
-                const addressData = await checkAddress(account, i, chain, network, bipType, electrumClient, paths[bipType]);
+            tasks.push(checkAddress(account, i, chain, network, bipType, electrumClient, paths[bipType]).then(addressData => {
                 if (addressData.transactions.total > 0) {
                     results.usedAddresses.push(addressData);
                 } else {
@@ -143,11 +141,11 @@ async function checkAndGenerateAddresses(account, network, bipType, electrumClie
                     }
                 }
                 results.totalBalance += addressData.balance.total;
-            });
+            }));
         }
     }
 
-    await async.parallelLimit(tasks, 10); // Adjust the concurrency level as needed
+    await Promise.all(tasks);
 
     return results;
 }
