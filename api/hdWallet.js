@@ -9,7 +9,6 @@ const paths = {
     bip84: "m/84'/0'/0'"
 };
 
-const BATCH_SIZE = 100; // Adjust the batch size as needed
 const electrumServers = [
     { host: 'fulcrum.sethforprivacy.com', port: 50002, protocol: 'ssl' },
     { host: 'mempool.blocktrainer.de', port: 50002, protocol: 'ssl' },
@@ -71,22 +70,41 @@ async function generateWallet(mnemonic) {
 async function processAddressesForAllBipTypes(root, network, electrumClient) {
     let results = {};
     for (const [bipType, path] of Object.entries(paths)) {
-        results[bipType] = await processAddressesRecursively(root, network, electrumClient, bipType, path, 0, BATCH_SIZE);
+        results[bipType] = await processAddresses(root, network, electrumClient, bipType, path);
     }
     return results;
 }
 
-async function processAddressesRecursively(root, network, electrumClient, bipType, path, start, batchSize) {
+async function processAddresses(root, network, electrumClient, bipType, path) {
     let account = root.derivePath(path);
-    let results = await checkAndGenerateAddresses(account, network, bipType, electrumClient, start, batchSize);
+    let results = {
+        usedAddresses: [],
+        freshReceiveAddress: null,
+        freshChangeAddress: null,
+        totalBalance: 0
+    };
 
-    while (!results.freshReceiveAddress || !results.freshChangeAddress) {
+    let batchSize = 10;
+    let start = 0;
+    let unusedReceiveFound = false;
+    let unusedChangeFound = false;
+
+    while (!unusedReceiveFound || !unusedChangeFound) {
+        const batchResults = await checkAndGenerateAddresses(account, network, bipType, electrumClient, start, batchSize);
+        results.usedAddresses.push(...batchResults.usedAddresses);
+        results.totalBalance += batchResults.totalBalance;
+
+        if (!unusedReceiveFound && batchResults.freshReceiveAddress) {
+            results.freshReceiveAddress = batchResults.freshReceiveAddress;
+            unusedReceiveFound = true;
+        }
+        if (!unusedChangeFound && batchResults.freshChangeAddress) {
+            results.freshChangeAddress = batchResults.freshChangeAddress;
+            unusedChangeFound = true;
+        }
+
         start += batchSize;
-        const nextBatchResults = await checkAndGenerateAddresses(account, network, bipType, electrumClient, start, batchSize);
-        results.usedAddresses.push(...nextBatchResults.usedAddresses);
-        results.totalBalance += nextBatchResults.totalBalance;
-        if (!results.freshReceiveAddress) results.freshReceiveAddress = nextBatchResults.freshReceiveAddress;
-        if (!results.freshChangeAddress) results.freshChangeAddress = nextBatchResults.freshChangeAddress;
+        batchSize *= 2;
     }
 
     // Ensure freshReceiveAddress and freshChangeAddress are set to the first unused path if none were found
