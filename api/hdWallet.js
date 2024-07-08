@@ -110,6 +110,28 @@ async function processAddresses(root, network, electrumClient, bipType, path) {
 
     results.usedAddresses.sort((a, b) => a.path.localeCompare(b.path));
 
+    // Ensure fresh addresses are set if not found
+    if (!results.freshReceiveAddress) {
+        results.freshReceiveAddress = {
+            address: getAddress(account.derivePath(`0/0`), network, bipType),
+            wif: account.derivePath(`0/0`).toWIF(),
+            path: `${path}/0/0`,
+            balance: { confirmed: 0, unconfirmed: 0, total: 0 },
+            transactions: { confirmed: 0, unconfirmed: 0, total: 0 },
+            utxos: []
+        };
+    }
+    if (!results.freshChangeAddress) {
+        results.freshChangeAddress = {
+            address: getAddress(account.derivePath(`1/0`), network, bipType),
+            wif: account.derivePath(`1/0`).toWIF(),
+            path: `${path}/1/0`,
+            balance: { confirmed: 0, unconfirmed: 0, total: 0 },
+            transactions: { confirmed: 0, unconfirmed: 0, total: 0 },
+            utxos: []
+        };
+    }
+
     return results;
 }
 
