@@ -128,6 +128,28 @@ async function checkAndGenerateAddresses(account, network, bipType, electrumClie
         await Promise.all(tasks);
     }
 
+    // Ensure freshReceiveAddress and freshChangeAddress are set to the first unused path if none were found
+    if (!results.freshReceiveAddress) {
+        results.freshReceiveAddress = {
+            address: getAddress(account.derivePath(`0/0`), network, bipType),
+            wif: account.derivePath(`0/0`).toWIF(),
+            path: `${paths[bipType]}/0/0`,
+            balance: { confirmed: 0, unconfirmed: 0, total: 0 },
+            transactions: { confirmed: 0, unconfirmed: 0, total: 0 },
+            utxos: []
+        };
+    }
+    if (!results.freshChangeAddress) {
+        results.freshChangeAddress = {
+            address: getAddress(account.derivePath(`1/0`), network, bipType),
+            wif: account.derivePath(`1/0`).toWIF(),
+            path: `${paths[bipType]}/1/0`,
+            balance: { confirmed: 0, unconfirmed: 0, total: 0 },
+            transactions: { confirmed: 0, unconfirmed: 0, total: 0 },
+            utxos: []
+        };
+    }
+
     return results;
 }
 
