@@ -86,48 +86,29 @@ async function processAddresses(root, network, electrumClient, bipType, path) {
 
     let batchSize = 10;
     let start = 0;
-    let unusedReceiveFound = false;
-    let unusedChangeFound = false;
+    let receiveUnusedFound = false;
+    let changeUnusedFound = false;
 
-    while (!unusedReceiveFound || !unusedChangeFound) {
+    while (!receiveUnusedFound || !changeUnusedFound) {
         const batchResults = await checkAndGenerateAddresses(account, network, bipType, electrumClient, start, batchSize);
+
         results.usedAddresses.push(...batchResults.usedAddresses);
         results.totalBalance += batchResults.totalBalance;
 
-        if (!unusedReceiveFound && batchResults.freshReceiveAddress) {
+        if (!receiveUnusedFound && batchResults.freshReceiveAddress) {
             results.freshReceiveAddress = batchResults.freshReceiveAddress;
-            unusedReceiveFound = true;
+            receiveUnusedFound = true;
         }
-        if (!unusedChangeFound && batchResults.freshChangeAddress) {
+        if (!changeUnusedFound && batchResults.freshChangeAddress) {
             results.freshChangeAddress = batchResults.freshChangeAddress;
-            unusedChangeFound = true;
+            changeUnusedFound = true;
         }
 
         start += batchSize;
         batchSize *= 2;
     }
 
-    // Ensure freshReceiveAddress and freshChangeAddress are set to the first unused path if none were found
-    if (!results.freshReceiveAddress) {
-        results.freshReceiveAddress = {
-            address: getAddress(account.derivePath(`0/0`), network, bipType),
-            wif: account.derivePath(`0/0`).toWIF(),
-            path: `${path}/0/0`,
-            balance: { confirmed: 0, unconfirmed: 0, total: 0 },
-            transactions: { confirmed: 0, unconfirmed: 0, total: 0 },
-            utxos: []
-        };
-    }
-    if (!results.freshChangeAddress) {
-        results.freshChangeAddress = {
-            address: getAddress(account.derivePath(`1/0`), network, bipType),
-            wif: account.derivePath(`1/0`).toWIF(),
-            path: `${path}/1/0`,
-            balance: { confirmed: 0, unconfirmed: 0, total: 0 },
-            transactions: { confirmed: 0, unconfirmed: 0, total: 0 },
-            utxos: []
-        };
-    }
+    results.usedAddresses.sort((a, b) => a.path.localeCompare(b.path));
 
     return results;
 }
@@ -140,32 +121,26 @@ async function checkAndGenerateAddresses(account, network, bipType, electrumClie
         totalBalance: 0
     };
 
-    let tasks = [];
+    let receiveUnused = false;
+    let changeUnused = false;
+
     for (let i = start; i < start + batchSize; i++) {
         for (const chain of [0, 1]) {
-            tasks.push(checkAddress(account, i, chain, network, bipType, electrumClient, paths[bipType])
-                .then(addressData => {
-                    if (addressData.transactions.total > 0) {
-                        results.usedAddresses.push(addressData);
-                    } else {
-                        if (chain === 0 && !results.freshReceiveAddress) {
-                            results.freshReceiveAddress = addressData;
-                        } else if (chain === 1 && !results.freshChangeAddress) {
-                            results.freshChangeAddress = addressData;
-                        }
-                    }
-                    results.totalBalance += addressData.balance.total;
-                }));
+            const addressData = await checkAddress(account, i, chain, network, bipType, electrumClient, paths[bipType]);
+            if (addressData.transactions.total > 0) {
+                results.usedAddresses.push(addressData);
+            } else {
+                if (chain === 0 && !receiveUnused) {
+                    results.freshReceiveAddress = addressData;
+                    receiveUnused = true;
+                }
+                if (chain === 1 && !changeUnused) {
+                    results.freshChangeAddress = addressData;
+                    changeUnused = true;
+                }
+            }
+            results.totalBalance += addressData.balance.total;
         }
-
-        if (tasks.length >= 10) {
-            await Promise.all(tasks);
-            tasks = [];
-        }
-    }
-
-    if (tasks.length > 0) {
-        await Promise.all(tasks);
     }
 
     return results;
