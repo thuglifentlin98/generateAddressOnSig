@@ -92,7 +92,7 @@ async function processAddressesRecursively(root, network, electrumClient, bipTyp
     return results;
 }
 
-async function checkAndGenerateAddresses(account, network, bipType, electrumClient, start, end) {
+async function checkAndGenerateAddresses(account, network, bipType, electrumClient, start, batchSize) {
     let results = {
         usedAddresses: [],
         freshReceiveAddress: null,
@@ -101,7 +101,7 @@ async function checkAndGenerateAddresses(account, network, bipType, electrumClie
     };
 
     let tasks = [];
-    for (let i = start; i < start + end; i++) {
+    for (let i = start; i < start + batchSize; i++) {
         for (const chain of [0, 1]) {
             tasks.push(checkAddress(account, i, chain, network, bipType, electrumClient, paths[bipType])
                 .then(addressData => {
