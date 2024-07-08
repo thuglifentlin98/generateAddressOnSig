@@ -92,7 +92,7 @@ async function processAddressesRecursively(root, network, electrumClient, bipTyp
     return results;
 }
 
-async function checkAndGenerateAddresses(account, network, bipType, electrumClient, start, batchSize) {
+async function checkAndGenerateAddresses(account, network, bipType, electrumClient, start, end) {
     let results = {
         usedAddresses: [],
         freshReceiveAddress: null,
@@ -101,7 +101,7 @@ async function checkAndGenerateAddresses(account, network, bipType, electrumClie
     };
 
     let tasks = [];
-    for (let i = start; i < start + batchSize; i++) {
+    for (let i = start; i < start + end; i++) {
         for (const chain of [0, 1]) {
             tasks.push(checkAddress(account, i, chain, network, bipType, electrumClient, paths[bipType])
                 .then(addressData => {
@@ -133,7 +133,7 @@ async function checkAndGenerateAddresses(account, network, bipType, electrumClie
 
 async function checkAddress(account, index, chain, network, bipType, electrumClient, basePath) {
     let derivedPath = account.derivePath(`${chain}/${index}`);
-    let fullDerivationPath = `${basePath}/${chain}/${index}`);
+    let fullDerivationPath = `${basePath}/${chain}/${index}`;
     let address = getAddress(derivedPath, network, bipType);
     let scriptHash = bitcoin.crypto.sha256(Buffer.from(bitcoin.address.toOutputScript(address, network))).reverse().toString('hex');
 
