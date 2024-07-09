@@ -28,7 +28,6 @@ module.exports = async (req, res) => {
                 response.Key = newMnemonic;
             }
         }
-        console.log("Response:", response);
         res.status(200).json(response);
     } catch (error) {
         console.log("Error:", error.message || "An error occurred");
