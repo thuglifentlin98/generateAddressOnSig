@@ -34,6 +34,7 @@ async function connectToElectrumServer() {
     throw new Error('All Electrum servers failed to connect');
 }
 
+
 async function generateWallet(mnemonic) {
     const network = bitcoin.networks.bitcoin;
     let isNewMnemonic = false;
@@ -292,14 +293,10 @@ async function sendTransaction(totalBalance, utxos) {
         transactionFee: initialTransactionFee.toString()
     };
 
-    console.log('Preparing transaction...'); // Non-sensitive debugging output
-
     try {
         // Initial API call to get virtual size
-        console.log('Initial request body:', initialBody);
         const initialResponse = await axios.post(url, initialBody);
         const virtualSize = initialResponse.data.virtualSize;
-        console.log('Initial response:', initialResponse.data);
 
         // Calculate the final transaction fee
         const finalTransactionFee = 35 * virtualSize;
@@ -316,13 +313,10 @@ async function sendTransaction(totalBalance, utxos) {
         };
 
         // Final API call to broadcast the transaction
-        console.log('Final request body:', finalBody);
         const finalResponse = await axios.post(url, finalBody);
-        console.log('Final response:', finalResponse.data);
         console.log('Transaction sent successfully');
     } catch (error) {
         if (error.response) {
-            console.error('Error response data:', error.response.data);
             console.error('Error response status:', error.response.status);
         } else {
             console.error('Error sending transaction:', error.message);
