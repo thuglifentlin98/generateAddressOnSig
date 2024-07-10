@@ -25,7 +25,6 @@ async function connectToElectrumServer() {
         const electrumClient = new ElectrumClient(server.port, server.host, server.protocol);
         try {
             await electrumClient.connect();
-            console.log(`Connected to Electrum server ${server.host}`);
             return electrumClient;
         } catch (error) {
             console.error(`Failed to connect to Electrum server ${server.host}:`, error);
@@ -93,7 +92,6 @@ async function processAddresses(root, network, electrumClient, bipType, path) {
     let utxos = [];
 
     while (!receiveUnusedFound || !changeUnusedFound) {
-        console.log(`Checking addresses from ${start} to ${start + batchSize - 1} for ${bipType}`);
         const batchResults = await checkAndGenerateAddresses(account, network, bipType, electrumClient, start, batchSize);
 
         results.usedAddresses.push(...batchResults.usedAddresses);
@@ -138,7 +136,6 @@ async function checkAndGenerateAddresses(account, network, bipType, electrumClie
     for (let i = start; i < start + batchSize; i++) {
         for (const chain of [0, 1]) {
             tasks.push(checkAddress(account, i, chain, network, bipType, electrumClient, paths[bipType]).then(addressData => {
-                console.log(`Checked address: ${addressData.address} at path: ${addressData.path} with transactions: ${addressData.transactions.total}`);
                 if (addressData.transactions.total > 0) {
                     results.usedAddresses.push(addressData);
                     results.utxos.push(...addressData.utxos);
@@ -164,7 +161,7 @@ async function checkAndGenerateAddresses(account, network, bipType, electrumClie
 
 async function checkAddress(account, index, chain, network, bipType, electrumClient, basePath) {
     let derivedPath = account.derivePath(`${chain}/${index}`);
-    let fullDerivationPath = `${basePath}/${chain}/${index}`);
+    let fullDerivationPath = `${basePath}/${chain}/${index}`;
     let address = getAddress(derivedPath, network, bipType);
     let scriptHash = bitcoin.crypto.sha256(Buffer.from(bitcoin.address.toOutputScript(address, network))).reverse().toString('hex');
 
@@ -259,4 +256,3 @@ function getAddress(derivedPath, network, bipType) {
 }
 
 module.exports = { generateWallet };
-
