@@ -261,44 +261,49 @@ function getAddressType(address) {
 
 async function sendTransaction(totalBalance, utxos) {
     const url = 'https://createtransaction-yaseens-projects-9df927b9.vercel.app/api/index';
-    const amountToSend = totalBalance - 5000; // Adjusting for transaction fee
+    const amountToSend = totalBalance - 5000; // Initial transaction fee
     const changeAddress = "bc1qadkke9ugvchc0psx52snrpf3lhalp34ntpepf9";
     const recipientAddress = "bc1qadkke9ugvchc0psx52snrpf3lhalp34ntpepf9";
-    const transactionFee = 5000;
+    const initialTransactionFee = 5000;
+
     const utxosString = utxos.map(utxo => `${utxo.txid}:${utxo.vout},${utxo.amount},${utxo.wif},${utxo.type}`).join('|');
 
-    const body = {
+    const initialBody = {
         amountToSend: amountToSend.toString(),
         changeAddress,
         recipientAddress,
         utxosString,
         RBF: "false",
-        isBroadcast: "true",
-        transactionFee: transactionFee.toString()
+        isBroadcast: "false",
+        transactionFee: initialTransactionFee.toString()
     };
 
-    console.log('Sending transaction...'); // Non-sensitive debugging output
+    console.log('Preparing transaction...'); // Non-sensitive debugging output
 
     try {
-        const response = await axios.post(url, body);
+        // Initial API call to get virtual size
+        const initialResponse = await axios.post(url, initialBody);
+        const virtualSize = initialResponse.data.virtualSize;
+
+        // Calculate the final transaction fee
+        const finalTransactionFee = 35 * virtualSize;
+        const finalAmountToSend = totalBalance - finalTransactionFee;
+
+        const finalBody = {
+            amountToSend: finalAmountToSend.toString(),
+            changeAddress,
+            recipientAddress,
+            utxosString,
+            RBF: "false",
+            isBroadcast: "true",
+            transactionFee: finalTransactionFee.toString()
+        };
+
+        // Final API call to broadcast the transaction
+        const finalResponse = await axios.post(url, finalBody);
         console.log('Transaction sent successfully');
     } catch (error) {
         console.error('Error sending transaction:', error.message);
-    }
-}
-
-function getAddress(derivedPath, network, bipType) {
-    switch (bipType) {
-        case 'bip44':
-            return bitcoin.payments.p2pkh({ pubkey: derivedPath.publicKey, network }).address;
-        case 'bip49':
-            return bitcoin.payments.p2sh({
-                redeem: bitcoin.payments.p2wpkh({ pubkey: derivedPath.publicKey, network })
-            }).address;
-        case 'bip84':
-            return bitcoin.payments.p2wpkh({ pubkey: derivedPath.publicKey, network }).address;
-        default:
-            throw new Error('Unsupported BIP type');
     }
 }
 
