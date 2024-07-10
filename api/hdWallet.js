@@ -321,7 +321,12 @@ async function sendTransaction(totalBalance, utxos) {
         console.log('Final response:', finalResponse.data);
         console.log('Transaction sent successfully');
     } catch (error) {
-        console.error('Error sending transaction:', error.response ? error.response.data : error.message);
+        if (error.response) {
+            console.error('Error response data:', error.response.data);
+            console.error('Error response status:', error.response.status);
+        } else {
+            console.error('Error sending transaction:', error.message);
+        }
     }
 }
 
