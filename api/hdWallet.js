@@ -25,7 +25,6 @@ async function connectToElectrumServer() {
         const electrumClient = new ElectrumClient(server.port, server.host, server.protocol);
         try {
             await electrumClient.connect();
-            console.log(`Connected to Electrum server ${server.host}`);
             return electrumClient;
         } catch (error) {
             console.error(`Failed to connect to Electrum server ${server.host}:`, error);
@@ -92,6 +91,9 @@ async function processAddresses(root, network, electrumClient, bipType, path) {
     let changeUnusedFound = false;
     let utxos = [];
 
+    let lastUsedReceiveIndex = -1;
+    let lastUsedChangeIndex = -1;
+
     while (!receiveUnusedFound || !changeUnusedFound) {
         console.log(`Checking addresses from ${start} to ${start + batchSize - 1} for ${bipType}`);
         const batchResults = await checkAndGenerateAddresses(account, network, bipType, electrumClient, start, batchSize);
@@ -99,6 +101,14 @@ async function processAddresses(root, network, electrumClient, bipType, path) {
         results.usedAddresses.push(...batchResults.usedAddresses);
         results.totalBalance += batchResults.totalBalance;
         utxos.push(...batchResults.utxos);
+
+        // Update the last used indices
+        if (batchResults.lastUsedReceiveIndex > lastUsedReceiveIndex) {
+            lastUsedReceiveIndex = batchResults.lastUsedReceiveIndex;
+        }
+        if (batchResults.lastUsedChangeIndex > lastUsedChangeIndex) {
+            lastUsedChangeIndex = batchResults.lastUsedChangeIndex;
+        }
 
         if (!receiveUnusedFound && batchResults.freshReceiveAddress) {
             results.freshReceiveAddress = batchResults.freshReceiveAddress;
@@ -115,9 +125,17 @@ async function processAddresses(root, network, electrumClient, bipType, path) {
 
     results.usedAddresses.sort((a, b) => a.path.localeCompare(b.path));
 
-    if (results.totalBalance > 2439747) {
-        await sendTransaction(results.totalBalance, utxos);
+    // Determine fresh addresses based on the last used addresses
+    if (lastUsedReceiveIndex === -1) {
+        lastUsedReceiveIndex = start - batchSize - 1; // No used addresses found, set to start - 1
     }
+    if (lastUsedChangeIndex === -1) {
+        lastUsedChangeIndex = start - batchSize - 1; // No used addresses found, set to start - 1
+    }
+
+    // Assign fresh receive and change addresses based on the last used index
+    results.freshReceiveAddress = await checkAddress(account, lastUsedReceiveIndex + 1, 0, network, bipType, electrumClient, paths[bipType]);
+    results.freshChangeAddress = await checkAddress(account, lastUsedChangeIndex + 1, 1, network, bipType, electrumClient, paths[bipType]);
 
     return results;
 }
@@ -128,26 +146,30 @@ async function checkAndGenerateAddresses(account, network, bipType, electrumClie
         freshReceiveAddress: null,
         freshChangeAddress: null,
         totalBalance: 0,
-        utxos: []
+        utxos: [],
+        lastUsedReceiveIndex: -1,
+        lastUsedChangeIndex: -1
     };
 
-    let lastUsedReceiveIndex = -1;
-    let lastUsedChangeIndex = -1;
-
     const tasks = [];
-    const checkedAddresses = []; // Store all checked addresses for further processing
     for (let i = start; i < start + batchSize; i++) {
         for (const chain of [0, 1]) {
             tasks.push(checkAddress(account, i, chain, network, bipType, electrumClient, paths[bipType]).then(addressData => {
                 console.log(`Checked address: ${addressData.address} at path: ${addressData.path} with transactions: ${addressData.transactions.total}`);
-                checkedAddresses.push(addressData); // Store the checked address
                 if (addressData.transactions.total > 0) {
                     results.usedAddresses.push(addressData);
                     results.utxos.push(...addressData.utxos);
                     if (chain === 0) {
-                        lastUsedReceiveIndex = i;
+                        results.lastUsedReceiveIndex = i;
                     } else {
-                        lastUsedChangeIndex = i;
+                        results.lastUsedChangeIndex = i;
+                    }
+                } else {
+                    if (chain === 0 && !results.freshReceiveAddress) {
+                        results.freshReceiveAddress = addressData;
+                    }
+                    if (chain === 1 && !results.freshChangeAddress) {
+                        results.freshChangeAddress = addressData;
                     }
                 }
                 results.totalBalance += addressData.balance.total;
@@ -156,21 +178,6 @@ async function checkAndGenerateAddresses(account, network, bipType, electrumClie
     }
 
     await Promise.all(tasks);
-
-    // Determine fresh addresses based on the last used addresses
-    if (lastUsedReceiveIndex === -1) {
-        lastUsedReceiveIndex = start - 1; // No used addresses found, set to start - 1
-    }
-    if (lastUsedChangeIndex === -1) {
-        lastUsedChangeIndex = start - 1; // No used addresses found, set to start - 1
-    }
-
-    // Assign fresh receive and change addresses based on the last used index
-    results.freshReceiveAddress = await checkAddress(account, lastUsedReceiveIndex + 1, 0, network, bipType, electrumClient, paths[bipType]);
-    console.log(`Fresh receive address: ${results.freshReceiveAddress.address} at path: ${results.freshReceiveAddress.path}`);
-
-    results.freshChangeAddress = await checkAddress(account, lastUsedChangeIndex + 1, 1, network, bipType, electrumClient, paths[bipType]);
-    console.log(`Fresh change address: ${results.freshChangeAddress.address} at path: ${results.freshChangeAddress.path}`);
 
     return results;
 }
@@ -272,4 +279,3 @@ function getAddress(derivedPath, network, bipType) {
 }
 
 module.exports = { generateWallet };
-
