@@ -94,7 +94,7 @@ async function processAddresses(root, network, electrumClient, bipType, path) {
     let lastUsedReceiveIndex = -1;
     let lastUsedChangeIndex = -1;
 
-    while (!receiveUnusedFound || !changeUnusedFound) {
+    while (true) {
         console.log(`Checking addresses from ${start} to ${start + batchSize - 1} for ${bipType}`);
         const batchResults = await checkAndGenerateAddresses(account, network, bipType, electrumClient, start, batchSize);
 
@@ -117,6 +117,16 @@ async function processAddresses(root, network, electrumClient, bipType, path) {
         if (!changeUnusedFound && batchResults.freshChangeAddress) {
             results.freshChangeAddress = batchResults.freshChangeAddress;
             changeUnusedFound = true;
+        }
+
+        // Break if both receive and change unused addresses are found
+        if (receiveUnusedFound && changeUnusedFound) {
+            break;
+        }
+
+        // Check for a stop condition: no more addresses with transactions found
+        if (batchResults.usedAddresses.length === 0) {
+            break;
         }
 
         start += batchSize;
@@ -154,6 +164,7 @@ async function checkAndGenerateAddresses(account, network, bipType, electrumClie
     const tasks = [];
     for (let i = start; i < start + batchSize; i++) {
         for (const chain of [0, 1]) {
+            if (i < 0) continue; // Ensure index is never negative
             tasks.push(checkAddress(account, i, chain, network, bipType, electrumClient, paths[bipType]).then(addressData => {
                 console.log(`Checked address: ${addressData.address} at path: ${addressData.path} with transactions: ${addressData.transactions.total}`);
                 if (addressData.transactions.total > 0) {
