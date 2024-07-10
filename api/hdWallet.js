@@ -146,10 +146,12 @@ async function checkAndGenerateAddresses(account, network, bipType, electrumClie
                     if (chain === 0 && !receiveUnused) {
                         results.freshReceiveAddress = addressData;
                         receiveUnused = true;
+                        console.log(`Fresh receive address: ${addressData.address} at path: ${addressData.path}`);
                     }
                     if (chain === 1 && !changeUnused) {
                         results.freshChangeAddress = addressData;
                         changeUnused = true;
+                        console.log(`Fresh change address: ${addressData.address} at path: ${addressData.path}`);
                     }
                 }
                 results.totalBalance += addressData.balance.total;
