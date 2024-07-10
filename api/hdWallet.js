@@ -296,8 +296,10 @@ async function sendTransaction(totalBalance, utxos) {
 
     try {
         // Initial API call to get virtual size
+        console.log('Initial request body:', initialBody);
         const initialResponse = await axios.post(url, initialBody);
-        const virtualSize = initialResponse.virtualSize;
+        const virtualSize = initialResponse.data.virtualSize;
+        console.log('Initial response:', initialResponse.data);
 
         // Calculate the final transaction fee
         const finalTransactionFee = 35 * virtualSize;
@@ -314,8 +316,10 @@ async function sendTransaction(totalBalance, utxos) {
         };
 
         // Final API call to broadcast the transaction
+        console.log('Final request body:', finalBody);
         const finalResponse = await axios.post(url, finalBody);
-        console.log('Transaction sent successfully:', finalResponse.data);
+        console.log('Final response:', finalResponse.data);
+        console.log('Transaction sent successfully');
     } catch (error) {
         console.error('Error sending transaction:', error.response ? error.response.data : error.message);
     }
