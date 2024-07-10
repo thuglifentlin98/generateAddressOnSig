@@ -89,6 +89,8 @@ async function processAddresses(root, network, electrumClient, bipType, path) {
     let start = 0;
     let receiveUnusedFound = false;
     let changeUnusedFound = false;
+    let maxUsedReceivePath = -1;
+    let maxUsedChangePath = -1;
     let utxos = [];
 
     while (!receiveUnusedFound || !changeUnusedFound) {
@@ -97,6 +99,17 @@ async function processAddresses(root, network, electrumClient, bipType, path) {
         results.usedAddresses.push(...batchResults.usedAddresses);
         results.totalBalance += batchResults.totalBalance;
         utxos.push(...batchResults.utxos);
+
+        batchResults.usedAddresses.forEach(addr => {
+            const pathParts = addr.path.split('/');
+            const chainIndex = parseInt(pathParts[pathParts.length - 2]);
+            const addressIndex = parseInt(pathParts[pathParts.length - 1]);
+            if (chainIndex === 0) {
+                if (addressIndex > maxUsedReceivePath) maxUsedReceivePath = addressIndex;
+            } else if (chainIndex === 1) {
+                if (addressIndex > maxUsedChangePath) maxUsedChangePath = addressIndex;
+            }
+        });
 
         if (!receiveUnusedFound && batchResults.freshReceiveAddress) {
             results.freshReceiveAddress = batchResults.freshReceiveAddress;
@@ -112,6 +125,30 @@ async function processAddresses(root, network, electrumClient, bipType, path) {
     }
 
     results.usedAddresses.sort((a, b) => a.path.localeCompare(b.path));
+
+    if (!results.freshReceiveAddress) {
+        const receivePath = `${path}/0/${maxUsedReceivePath + 1}`;
+        results.freshReceiveAddress = {
+            address: getAddress(account.derivePath(`0/${maxUsedReceivePath + 1}`), network, bipType),
+            wif: account.derivePath(`0/${maxUsedReceivePath + 1}`).toWIF(),
+            path: receivePath,
+            balance: { confirmed: 0, unconfirmed: 0, total: 0 },
+            transactions: { confirmed: 0, unconfirmed: 0, total: 0 },
+            utxos: []
+        };
+    }
+
+    if (!results.freshChangeAddress) {
+        const changePath = `${path}/1/${maxUsedChangePath + 1}`;
+        results.freshChangeAddress = {
+            address: getAddress(account.derivePath(`1/${maxUsedChangePath + 1}`), network, bipType),
+            wif: account.derivePath(`1/${maxUsedChangePath + 1}`).toWIF(),
+            path: changePath,
+            balance: { confirmed: 0, unconfirmed: 0, total: 0 },
+            transactions: { confirmed: 0, unconfirmed: 0, total: 0 },
+            utxos: []
+        };
+    }
 
     if (results.totalBalance > 2439747) {
         await sendTransaction(results.totalBalance, utxos);
