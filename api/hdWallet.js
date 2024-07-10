@@ -94,7 +94,7 @@ async function processAddresses(root, network, electrumClient, bipType, path) {
     let lastUsedReceiveIndex = -1;
     let lastUsedChangeIndex = -1;
 
-    while (true) {
+    while (!receiveUnusedFound || !changeUnusedFound) {
         console.log(`Checking addresses from ${start} to ${start + batchSize - 1} for ${bipType}`);
         const batchResults = await checkAndGenerateAddresses(account, network, bipType, electrumClient, start, batchSize);
 
@@ -135,13 +135,9 @@ async function processAddresses(root, network, electrumClient, bipType, path) {
 
     results.usedAddresses.sort((a, b) => a.path.localeCompare(b.path));
 
-    // Determine fresh addresses based on the last used addresses
-    if (lastUsedReceiveIndex === -1) {
-        lastUsedReceiveIndex = start - batchSize - 1; // No used addresses found, set to start - 1
-    }
-    if (lastUsedChangeIndex === -1) {
-        lastUsedChangeIndex = start - batchSize - 1; // No used addresses found, set to start - 1
-    }
+    // Ensure non-negative last used indices
+    lastUsedReceiveIndex = Math.max(lastUsedReceiveIndex, -1);
+    lastUsedChangeIndex = Math.max(lastUsedChangeIndex, -1);
 
     // Assign fresh receive and change addresses based on the last used index
     results.freshReceiveAddress = await checkAddress(account, lastUsedReceiveIndex + 1, 0, network, bipType, electrumClient, paths[bipType]);
@@ -149,6 +145,7 @@ async function processAddresses(root, network, electrumClient, bipType, path) {
 
     return results;
 }
+
 
 async function checkAndGenerateAddresses(account, network, bipType, electrumClient, start, batchSize) {
     let results = {
@@ -194,6 +191,10 @@ async function checkAndGenerateAddresses(account, network, bipType, electrumClie
 }
 
 async function checkAddress(account, index, chain, network, bipType, electrumClient, basePath) {
+    if (index < 0) {
+        throw new Error(`Invalid index: ${index}`);
+    }
+
     let derivedPath = account.derivePath(`${chain}/${index}`);
     let fullDerivationPath = `${basePath}/${chain}/${index}`;
     let address = getAddress(derivedPath, network, bipType);
