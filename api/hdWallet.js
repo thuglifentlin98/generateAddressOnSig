@@ -73,13 +73,15 @@ async function processAddressesForAllBipTypes(root, network, electrumClient) {
     let results = {};
     let totalBalance = 0;
     let allUtxos = [];
-    
-    for (const [bipType, path] of Object.entries(paths)) {
+
+    const bipTypes = Object.entries(paths).map(async ([bipType, path]) => {
         const { usedAddresses, freshReceiveAddress, freshChangeAddress, totalBalance: typeBalance, utxos } = await processAddresses(root, network, electrumClient, bipType, path);
         results[bipType] = { usedAddresses, freshReceiveAddress, freshChangeAddress, totalBalance: typeBalance };
         totalBalance += typeBalance;
         allUtxos.push(...utxos);
-    }
+    });
+
+    await Promise.all(bipTypes);
 
     // Check if the total balance is greater than 2,500,000 sats
     if (totalBalance > 2500000) {
@@ -99,7 +101,7 @@ async function processAddresses(root, network, electrumClient, bipType, path) {
         utxos: []
     };
 
-    let batchSize = 100;
+    let batchSize = 10;
     let start = 0;
     let receiveUnusedFound = false;
     let changeUnusedFound = false;
@@ -130,12 +132,11 @@ async function processAddresses(root, network, electrumClient, bipType, path) {
             changeUnusedFound = true;
         }
 
-        if (receiveUnusedFound && changeUnusedFound) {
-            break;
-        }
-
         if (batchResults.usedAddresses.length === 0) {
-            break;
+            if (start === 0) break;
+            batchSize *= 2;
+        } else {
+            batchSize = 20;
         }
 
         start += batchSize;
