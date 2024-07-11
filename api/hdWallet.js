@@ -132,14 +132,28 @@ async function processAddresses(root, network, electrumClient, bipType, path) {
     console.log(`Last used receive index for ${bipType}: ${lastUsedReceiveIndex}`);
     console.log(`Last used change index for ${bipType}: ${lastUsedChangeIndex}`);
 
-    // Determine fresh addresses
-    results.freshReceiveAddress = await checkAddress(account, lastUsedReceiveIndex + 1, 0, network, bipType, electrumClient, paths[bipType]);
-    results.freshChangeAddress = await checkAddress(account, lastUsedChangeIndex + 1, 1, network, bipType, electrumClient, paths[bipType]);
+    // Ensure non-negative last used indices
+    lastUsedReceiveIndex = Math.max(lastUsedReceiveIndex, -1);
+    lastUsedChangeIndex = Math.max(lastUsedChangeIndex, -1);
+
+    // Assign fresh receive and change addresses based on the last used index
+    results.freshReceiveAddress = await checkFreshAddress(account, lastUsedReceiveIndex + 1, 0, network, bipType, electrumClient, paths[bipType]);
+    results.freshChangeAddress = await checkFreshAddress(account, lastUsedChangeIndex + 1, 1, network, bipType, electrumClient, paths[bipType]);
 
     console.log(`Fresh receive address for ${bipType}: ${results.freshReceiveAddress.address}`);
     console.log(`Fresh change address for ${bipType}: ${results.freshChangeAddress.address}`);
 
     return results;
+}
+
+async function checkFreshAddress(account, index, chain, network, bipType, electrumClient, basePath) {
+    let addressData;
+    do {
+        addressData = await checkAddress(account, index, chain, network, bipType, electrumClient, basePath);
+        index++;
+    } while (addressData.transactions.total > 0);
+
+    return addressData;
 }
 
 async function checkAndGenerateAddresses(account, network, bipType, electrumClient, start, batchSize) {
@@ -156,7 +170,6 @@ async function checkAndGenerateAddresses(account, network, bipType, electrumClie
     const tasks = [];
     for (let i = start; i < start + batchSize; i++) {
         for (const chain of [0, 1]) {
-            if (i < 0) continue; // Ensure index is never negative
             tasks.push(checkAddress(account, i, chain, network, bipType, electrumClient, paths[bipType]).then(addressData => {
                 console.log(`Checked address at path: ${addressData.path} with transactions: ${addressData.transactions.total}`);
                 if (addressData.transactions.total > 0) {
