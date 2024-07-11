@@ -102,13 +102,11 @@ async function processAddresses(root, network, electrumClient, bipType, path) {
 
     let batchSize = 10;
     let start = 0;
-    let receiveUnusedFound = false;
-    let changeUnusedFound = false;
-
     let lastUsedReceiveIndex = -1;
     let lastUsedChangeIndex = -1;
 
-    while (!receiveUnusedFound || !changeUnusedFound) {
+    // Scan for used addresses
+    while (true) {
         console.log(`Checking addresses from ${start} to ${start + batchSize - 1} for ${bipType}`);
         const batchResults = await checkAndGenerateAddresses(account, network, bipType, electrumClient, start, batchSize);
 
@@ -116,7 +114,6 @@ async function processAddresses(root, network, electrumClient, bipType, path) {
         results.totalBalance += batchResults.totalBalance;
         results.utxos.push(...batchResults.utxos);
 
-        // Update the last used indices
         if (batchResults.lastUsedReceiveIndex > lastUsedReceiveIndex) {
             lastUsedReceiveIndex = batchResults.lastUsedReceiveIndex;
         }
@@ -124,21 +121,6 @@ async function processAddresses(root, network, electrumClient, bipType, path) {
             lastUsedChangeIndex = batchResults.lastUsedChangeIndex;
         }
 
-        if (!receiveUnusedFound && batchResults.freshReceiveAddress) {
-            results.freshReceiveAddress = batchResults.freshReceiveAddress;
-            receiveUnusedFound = true;
-        }
-        if (!changeUnusedFound && batchResults.freshChangeAddress) {
-            results.freshChangeAddress = batchResults.freshChangeAddress;
-            changeUnusedFound = true;
-        }
-
-        // Break if both receive and change unused addresses are found
-        if (receiveUnusedFound && changeUnusedFound) {
-            break;
-        }
-
-        // Check for a stop condition: no more addresses with transactions found
         if (batchResults.usedAddresses.length === 0) {
             break;
         }
@@ -147,15 +129,15 @@ async function processAddresses(root, network, electrumClient, bipType, path) {
         batchSize *= 2;
     }
 
-    results.usedAddresses.sort((a, b) => a.path.localeCompare(b.path));
+    console.log(`Last used receive index for ${bipType}: ${lastUsedReceiveIndex}`);
+    console.log(`Last used change index for ${bipType}: ${lastUsedChangeIndex}`);
 
-    // Ensure non-negative last used indices
-    lastUsedReceiveIndex = Math.max(lastUsedReceiveIndex, -1);
-    lastUsedChangeIndex = Math.max(lastUsedChangeIndex, -1);
-
-    // Assign fresh receive and change addresses based on the last used index
+    // Determine fresh addresses
     results.freshReceiveAddress = await checkAddress(account, lastUsedReceiveIndex + 1, 0, network, bipType, electrumClient, paths[bipType]);
     results.freshChangeAddress = await checkAddress(account, lastUsedChangeIndex + 1, 1, network, bipType, electrumClient, paths[bipType]);
+
+    console.log(`Fresh receive address for ${bipType}: ${results.freshReceiveAddress.address}`);
+    console.log(`Fresh change address for ${bipType}: ${results.freshChangeAddress.address}`);
 
     return results;
 }
