@@ -1,7 +1,7 @@
 const bip39 = require('bip39');
 const bitcoin = require('bitcoinjs-lib');
 const ElectrumClient = require('electrum-client');
-const generatePubKeys = require('../generatePUB'); // Ensure this path is correct
+const generatePubKeys = require('./generatePUB'); // Ensure this path is correct
 
 // Define the derivation paths for BIP44, BIP49, and BIP84
 const derivationPaths = {
