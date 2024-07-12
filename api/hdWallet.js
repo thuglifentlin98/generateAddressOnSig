@@ -210,7 +210,7 @@ async function checkAddress(account, index, chain, network, bipType, electrumCli
     }
 
     let derivedPath = account.derivePath(`${chain}/${index}`);
-    let fullDerivationPath = `${basePath}/${chain}/${index}`;
+    let fullDerivationPath = `${basePath}/${chain}/${index}`; // Fix the syntax error here
     let address = getAddress(derivedPath, network, bipType);
     let scriptHash = bitcoin.crypto.sha256(Buffer.from(bitcoin.address.toOutputScript(address, network))).reverse().toString('hex');
 
