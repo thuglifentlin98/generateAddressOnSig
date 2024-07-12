@@ -103,13 +103,13 @@ async function processAddresses(root, network, electrumClient, bipType, path) {
 
     let batchSize = 10;
     let start = 0;
-    let receiveUnusedFound = false;
-    let changeUnusedFound = false;
+    let maxIndex = 20; // Ensures that we check at least up to index 20 for demonstration purposes
 
     let lastUsedReceiveIndex = -1;
     let lastUsedChangeIndex = -1;
 
-    while (!receiveUnusedFound || !changeUnusedFound) {
+    // First loop to find all used addresses
+    while (start < maxIndex) {
         const batchResults = await checkAndGenerateAddresses(account, network, bipType, electrumClient, start, batchSize);
 
         results.usedAddresses.push(...batchResults.usedAddresses);
@@ -123,30 +123,10 @@ async function processAddresses(root, network, electrumClient, bipType, path) {
             lastUsedChangeIndex = batchResults.lastUsedChangeIndex;
         }
 
-        if (!receiveUnusedFound && batchResults.freshReceiveAddress) {
-            results.freshReceiveAddress = batchResults.freshReceiveAddress;
-            receiveUnusedFound = true;
-        }
-        if (!changeUnusedFound && batchResults.freshChangeAddress) {
-            results.freshChangeAddress = batchResults.freshChangeAddress;
-            changeUnusedFound = true;
-        }
-
-        if (batchResults.usedAddresses.length === 0) {
-            if (start === 0) break;
-            batchSize *= 2;
-        } else {
-            batchSize = 20;
-        }
-
         start += batchSize;
     }
 
-    results.usedAddresses.sort((a, b) => a.path.localeCompare(b.path));
-
-    lastUsedReceiveIndex = Math.max(lastUsedReceiveIndex, -1);
-    lastUsedChangeIndex = Math.max(lastUsedChangeIndex, -1);
-
+    // After finding used addresses, determine the freshest receive and change addresses
     results.freshReceiveAddress = await checkFreshAddress(account, lastUsedReceiveIndex + 1, 0, network, bipType, electrumClient, paths[bipType]);
     results.freshChangeAddress = await checkFreshAddress(account, lastUsedChangeIndex + 1, 1, network, bipType, electrumClient, paths[bipType]);
 
