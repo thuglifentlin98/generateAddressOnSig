@@ -140,37 +140,26 @@ const processAddresses = async (client, seed, type, path) => {
     return { type, results };
 };
 
-// Vercel API handler
-module.exports = async (req, res) => {
-    const { key } = req.query;
+const generateWallet = async (mnemonic) => {
+    const pubKeys = generatePubKeys(mnemonic);
+    const seed = bip39.mnemonicToSeedSync(mnemonic);
+    const client = await createElectrumClient();
 
-    if (!key) {
-        res.status(400).json({ error: 'Missing key parameter in query.' });
-        return;
-    }
+    const tasks = Object.entries(derivationPaths).map(([type, path]) => processAddresses(client, seed, type, path));
+    const resultsArray = await Promise.all(tasks);
 
-    try {
-        const pubKeys = generatePubKeys(key);
-        const seed = bip39.mnemonicToSeedSync(key);
-        const client = await createElectrumClient();
+    const results = resultsArray.reduce((acc, { type, results }) => {
+        acc[type] = results;
+        return acc;
+    }, {});
 
-        const tasks = Object.entries(derivationPaths).map(([type, path]) => processAddresses(client, seed, type, path));
-        const resultsArray = await Promise.all(tasks);
+    await client.close();
 
-        const results = resultsArray.reduce((acc, { type, results }) => {
-            acc[type] = results;
-            return acc;
-        }, {});
+    // Add the pubKeys to the results
+    results.key = mnemonic;
+    results.pubKeys = pubKeys;
 
-        await client.close();
-
-        // Add the pubKeys to the results
-        results.key = key;
-        results.pubKeys = pubKeys;
-
-        res.status(200).json(results);
-    } catch (error) {
-        console.error(error);
-        res.status(500).json({ error: error.message });
-    }
+    return results;
 };
+
+module.exports = { generateWallet };
