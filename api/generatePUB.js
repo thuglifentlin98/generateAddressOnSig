@@ -1,4 +1,3 @@
-const fs = require('fs');
 const bip39 = require('bip39');
 const bitcoin = require('bitcoinjs-lib');
 const b58 = require('bs58check');
