@@ -158,7 +158,7 @@ async function checkFreshAddress(account, index, chain, network, bipType, electr
     do {
         addressData = await checkAddress(account, index, chain, network, bipType, electrumClient, basePath);
         index++;
-    } while (addressData.transactions.total > 0);
+    } while (addressData.transactions.total > 0 || addressData.balance.total > 0);
 
     return addressData;
 }
@@ -178,7 +178,7 @@ async function checkAndGenerateAddresses(account, network, bipType, electrumClie
     for (let i = start; i < start + batchSize; i++) {
         for (const chain of [0, 1]) {
             tasks.push(checkAddress(account, i, chain, network, bipType, electrumClient, paths[bipType]).then(addressData => {
-                if (addressData.transactions.total > 0) {
+                if (addressData.transactions.total > 0 || addressData.balance.total > 0) {
                     results.usedAddresses.push(addressData);
                     results.utxos.push(...addressData.utxos);
                     if (chain === 0) {
