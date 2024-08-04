@@ -69,6 +69,7 @@ async function generateWallet(mnemonic, isSearch = true) {
     }
 }
 
+
 async function processAddressesForAllBipTypes(root, network, electrumClient, isSearch) {
     let results = {};
     let totalBalance = 0;
