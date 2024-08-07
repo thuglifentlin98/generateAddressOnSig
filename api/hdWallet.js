@@ -34,7 +34,7 @@ async function connectToElectrumServer() {
     throw new Error('All Electrum servers failed to connect');
 }
 
-async function generateWallet(mnemonic) {
+async function generateWallet(mnemonic, isSearch) {
     const network = bitcoin.networks.bitcoin;
     let isNewMnemonic = false;
 
