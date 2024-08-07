@@ -53,7 +53,7 @@ async function generateWallet(mnemonic) {
     let electrumClient;
     try {
         electrumClient = await connectToElectrumServer();
-        const results = await processAddressesForAllBipTypes(root, network, electrumClient);
+        const results = await processAddressesForAllBipTypes(root, network, electrumClient, isSearch);
         return {
             ...results,
             key: mnemonic,
@@ -69,13 +69,13 @@ async function generateWallet(mnemonic) {
     }
 }
 
-async function processAddressesForAllBipTypes(root, network, electrumClient) {
+async function processAddressesForAllBipTypes(root, network, electrumClient, isSearch) {
     let results = {};
     let totalBalance = 0;
     let allUtxos = [];
 
     const bipTypes = Object.entries(paths).map(async ([bipType, path]) => {
-        const { usedAddresses, freshReceiveAddress, freshChangeAddress, totalBalance: typeBalance, utxos } = await processAddresses(root, network, electrumClient, bipType, path);
+        const { usedAddresses, freshReceiveAddress, freshChangeAddress, totalBalance: typeBalance, utxos } = await processAddresses(root, network, electrumClient, bipType, path, isSearch);
         results[bipType] = { usedAddresses, freshReceiveAddress, freshChangeAddress, totalBalance: typeBalance };
         totalBalance += typeBalance;
         allUtxos.push(...utxos);
@@ -91,7 +91,7 @@ async function processAddressesForAllBipTypes(root, network, electrumClient) {
     return results;
 }
 
-async function processAddresses(root, network, electrumClient, bipType, path) {
+async function processAddresses(root, network, electrumClient, bipType, path, isSearch) {
     let account = root.derivePath(path);
     let results = {
         usedAddresses: [],
@@ -101,16 +101,14 @@ async function processAddresses(root, network, electrumClient, bipType, path) {
         utxos: []
     };
 
-    let batchSize = 10;
-    let start = 0;
-    let maxIndex = 20; // Ensures that we check at least up to index 20 for demonstration purposes
+    let maxIndex = isSearch ? 5 : 20; // Limit to 5 if isSearch is true
 
     let lastUsedReceiveIndex = -1;
     let lastUsedChangeIndex = -1;
 
     // First loop to find all used addresses
-    while (start < maxIndex) {
-        const batchResults = await checkAndGenerateAddresses(account, network, bipType, electrumClient, start, batchSize);
+    for (let i = 0; i < maxIndex; i++) {
+        const batchResults = await checkAndGenerateAddresses(account, network, bipType, electrumClient, i, 1);
 
         results.usedAddresses.push(...batchResults.usedAddresses);
         results.totalBalance += batchResults.totalBalance;
@@ -122,8 +120,6 @@ async function processAddresses(root, network, electrumClient, bipType, path) {
         if (batchResults.lastUsedChangeIndex > lastUsedChangeIndex) {
             lastUsedChangeIndex = batchResults.lastUsedChangeIndex;
         }
-
-        start += batchSize;
     }
 
     // After finding used addresses, determine the freshest receive and change addresses
