@@ -1,4 +1,5 @@
 const bitcoin = require('bitcoinjs-lib');
+const bip39 = require('bip39');
 const ElectrumClient = require('electrum-client');
 
 const electrumServers = [
@@ -8,134 +9,131 @@ const electrumServers = [
     { host: 'fortress.qtornado.com', port: 50002, protocol: 'ssl' },
     { host: 'electrumx-core.1209k.com', port: 50002, protocol: 'ssl' },
     { host: 'pipedream.fiatfaucet.com', port: 50002, protocol: 'ssl' },
+    // Add more servers as needed
 ];
 
-const connectToElectrumServer = async () => {
-    for (const server of electrumServers) {
-        const client = new ElectrumClient(server.port, server.host, server.protocol);
-        try {
-            await client.connect();
-            console.log(`Connected to Electrum server ${server.host}`);
-            return client;
-        } catch (error) {
-            console.error(`Failed to connect to Electrum server ${server.host}:`, error);
-        }
-    }
-    throw new Error('All Electrum servers failed to connect');
-};
+const network = bitcoin.networks.bitcoin;
 
-async function generateAddressesFromWIF(wif) {
-    const network = bitcoin.networks.bitcoin;
-    let keyPair;
+function isValidMnemonic(mnemonic) {
+    return bip39.validateMnemonic(mnemonic);
+}
 
+function isValidWIF(wif) {
     try {
-        keyPair = bitcoin.ECPair.fromWIF(wif, network);
-    } catch (error) {
-        console.error("Invalid WIF provided:", error);
-        return { error: "Invalid WIF provided." };
+        bitcoin.ECPair.fromWIF(wif, network);
+        return true;
+    } catch (e) {
+        return false;
     }
+}
 
-    const { address: p2pkhAddress } = bitcoin.payments.p2pkh({ pubkey: keyPair.publicKey, network });
-    const { address: p2shAddress } = bitcoin.payments.p2sh({
-        redeem: bitcoin.payments.p2wpkh({ pubkey: keyPair.publicKey, network })
-    });
-    const { address: p2wpkhAddress } = bitcoin.payments.p2wpkh({ pubkey: keyPair.publicKey, network });
-
-    console.log("Generated Addresses:", { p2pkhAddress, p2shAddress, p2wpkhAddress });
+function generateAddressesFromMnemonic(mnemonic) {
+    const seed = bip39.mnemonicToSeedSync(mnemonic);
+    const root = bitcoin.bip32.fromSeed(seed, network);
 
     const addresses = {
-        P2PKH: { address: p2pkhAddress },
-        P2SH_P2WPKH: { address: p2shAddress },
-        P2WPKH: { address: p2wpkhAddress }
+        bip84: { receive: [], change: [] },
+        bip49: { receive: [], change: [] },
+        bip44: { receive: [], change: [] }
     };
 
-    let client;
-    let maxBalanceAddress = null;
-    let maxTransactionAddress = null;
+    for (let i = 0; i < 6; i++) {
+        addresses.bip84.receive.push(generateAddress(root, `m/84'/0'/0'/0/${i}`, bitcoin.payments.p2wpkh));
+        addresses.bip84.change.push(generateAddress(root, `m/84'/0'/0'/1/${i}`, bitcoin.payments.p2wpkh));
 
-    try {
-        client = await connectToElectrumServer();
-        console.log("Connected to Electrum server.");
+        addresses.bip49.receive.push(generateP2SH_P2WPKH_Address(root, `m/49'/0'/0'/0/${i}`));
+        addresses.bip49.change.push(generateP2SH_P2WPKH_Address(root, `m/49'/0'/0'/1/${i}`));
 
-        let maxBalance = 0;
-        let maxTransactions = 0;
+        addresses.bip44.receive.push(generateAddress(root, `m/44'/0'/0'/0/${i}`, bitcoin.payments.p2pkh));
+        addresses.bip44.change.push(generateAddress(root, `m/44'/0'/0'/1/${i}`, bitcoin.payments.p2pkh));
+    }
 
-        for (const key in addresses) {
-            if (addresses.hasOwnProperty(key)) {
-                const balanceData = await getAddressBalance(addresses[key].address, network, client);
-                addresses[key] = { ...addresses[key], balance: balanceData.balance, transactions: balanceData.transactions, utxos: balanceData.utxos, key: wif };
-                console.log(`Address ${key} Data:`, addresses[key]);
+    return addresses;
+}
 
-                const totalBalance = balanceData.balance.total;
-                const totalTransactions = balanceData.transactions.total;
-                console.log(`Total balance for ${key}:`, totalBalance);
-                console.log(`Total transactions for ${key}:`, totalTransactions);
+function generateAddress(root, path, paymentFn) {
+    const child = root.derivePath(path);
+    return paymentFn({ pubkey: child.publicKey, network }).address;
+}
 
-                if (totalBalance > maxBalance) {
-                    maxBalance = totalBalance;
-                    maxBalanceAddress = addresses[key];
-                    console.log(`New max balance found in ${key}:`, maxBalance);
-                }
+function generateP2SH_P2WPKH_Address(root, path) {
+    const child = root.derivePath(path);
+    const p2wpkh = bitcoin.payments.p2wpkh({ pubkey: child.publicKey, network });
+    const p2sh = bitcoin.payments.p2sh({ redeem: p2wpkh, network });
+    return p2sh.address;
+}
 
-                if (totalTransactions > maxTransactions) {
-                    maxTransactions = totalTransactions;
-                    maxTransactionAddress = addresses[key];
-                    console.log(`New max transactions found in ${key}:`, maxTransactions);
+function scriptHash(address) {
+    const outputScript = bitcoin.address.toOutputScript(address, network);
+    const hash = bitcoin.crypto.sha256(outputScript).reverse();
+    return hash.toString('hex');
+}
+
+async function fetchElectrumData(address) {
+    const scripthash = scriptHash(address);
+
+    for (const server of electrumServers) {
+        const client = new ElectrumClient(server.port, server.host, server.protocol);
+        await client.connect();
+
+        try {
+            const balance = await client.request('blockchain.scripthash.get_balance', scripthash);
+            const utxos = await client.request('blockchain.scripthash.listunspent', scripthash);
+            const history = await client.request('blockchain.scripthash.get_history', scripthash);
+
+            await client.close();
+
+            return {
+                address,
+                balance,
+                utxos,
+                historyCount: history.length
+            };
+        } catch (e) {
+            await client.close();
+        }
+    }
+
+    throw new Error(`Failed to fetch data for address ${address}`);
+}
+
+async function main(key) {
+    let mnemonic;
+
+    if (isValidMnemonic(key)) {
+        mnemonic = key;
+    } else if (isValidWIF(key)) {
+        const keyPair = bitcoin.ECPair.fromWIF(key, network);
+        const { address } = bitcoin.payments.p2pkh({ pubkey: keyPair.publicKey, network });
+        console.log(`WIF Address: ${address}`);
+        return;
+    } else {
+        mnemonic = bip39.generateMnemonic();
+        console.log(`Generated Mnemonic: ${mnemonic}`);
+    }
+
+    const addresses = generateAddressesFromMnemonic(mnemonic);
+
+    for (const type of ['bip84', 'bip49', 'bip44']) {
+        console.log(`${type.toUpperCase()} Addresses:`);
+        for (const category of ['receive', 'change']) {
+            console.log(`  ${category.toUpperCase()}:`);
+            for (const address of addresses[type][category]) {
+                try {
+                    const data = await fetchElectrumData(address);
+                    console.log(`    Address: ${data.address}`);
+                    console.log(`      Balance: ${JSON.stringify(data.balance)}`);
+                    console.log(`      UTXOs: ${JSON.stringify(data.utxos)}`);
+                    console.log(`      Transaction History Count: ${data.historyCount}`);
+                } catch (e) {
+                    console.error(`Failed to fetch data for address ${address}: ${e.message}`);
                 }
             }
         }
-    } catch (error) {
-        console.error("Failed to connect or fetch data from Electrum server:", error);
-        return { error: "Failed to connect or fetch data from Electrum server." };
-    } finally {
-        if (client) {
-            await client.close();
-            console.log("Electrum client closed.");
-        }
     }
-
-    if (!maxBalanceAddress && !maxTransactionAddress) {
-        console.log("No addresses with balance or transactions found.");
-        return { isFoundAddresses: false };
-    }
-
-    const addressToReturn = maxBalanceAddress || maxTransactionAddress;
-
-    console.log("Returning address with max balance or transactions:", addressToReturn);
-    return {
-        Address: addressToReturn
-    };
 }
 
-async function getAddressBalance(address, network, electrumClient) {
-    let scriptHash = bitcoin.crypto.sha256(Buffer.from(bitcoin.address.toOutputScript(address, network))).reverse().toString('hex');
-    console.log(`Fetching data for script hash: ${scriptHash}`);
+// Provide your key (mnemonic or WIF) here
+const key = 'smooth voice purpose uncover agent busy that alone remove exhaust math trial';
 
-    // Fetch history, balance, and UTXOs concurrently
-    const [history, balance, utxos] = await Promise.all([
-        electrumClient.blockchainScripthash_getHistory(scriptHash),
-        electrumClient.blockchainScripthash_getBalance(scriptHash),
-        electrumClient.blockchainScripthash_listunspent(scriptHash)
-    ]);
-
-    return {
-        balance: {
-            confirmed: balance.confirmed,
-            unconfirmed: balance.unconfirmed,
-            total: balance.confirmed + balance.unconfirmed
-        },
-        transactions: {
-            confirmed: history.filter(tx => tx.height !== 0).length,
-            unconfirmed: history.filter(tx => tx.height === 0).length,
-            total: history.length
-        },
-        utxos: utxos.map(utxo => ({
-            txid: utxo.tx_hash,
-            vout: utxo.tx_pos,
-            amount: utxo.value,
-            status: utxo.height === 0 ? 'unconfirmed' : 'confirmed'
-        }))
-    };
-}
-
-module.exports = { generateAddressesFromWIF };
+main(key).catch(console.error);
