@@ -106,25 +106,38 @@ async function processAddresses(root, network, electrumClient, bipType, path, is
     let lastUsedReceiveIndex = -1;
     let lastUsedChangeIndex = -1;
 
-    // First loop to find all used addresses
+    // Loop to find used addresses and stop after 5 addresses for each type if isSearch is true
     for (let i = 0; i < maxIndex; i++) {
-        const batchResults = await checkAndGenerateAddresses(account, network, bipType, electrumClient, i, 1);
-
-        results.usedAddresses.push(...batchResults.usedAddresses);
-        results.totalBalance += batchResults.totalBalance;
-        results.utxos.push(...batchResults.utxos);
-
-        if (batchResults.lastUsedReceiveIndex > lastUsedReceiveIndex) {
-            lastUsedReceiveIndex = batchResults.lastUsedReceiveIndex;
+        // Process receive addresses (chain 0)
+        if (i < 5) {
+            const receiveResult = await checkAddress(account, i, 0, network, bipType, electrumClient, path);
+            if (receiveResult.transactions.total > 0 || receiveResult.balance.total > 0) {
+                results.usedAddresses.push(receiveResult);
+                results.totalBalance += receiveResult.balance.total;
+                results.utxos.push(...receiveResult.utxos);
+                lastUsedReceiveIndex = i;
+            }
         }
-        if (batchResults.lastUsedChangeIndex > lastUsedChangeIndex) {
-            lastUsedChangeIndex = batchResults.lastUsedChangeIndex;
+
+        // Process change addresses (chain 1)
+        if (i < 5) {
+            const changeResult = await checkAddress(account, i, 1, network, bipType, electrumClient, path);
+            if (changeResult.transactions.total > 0 || changeResult.balance.total > 0) {
+                results.usedAddresses.push(changeResult);
+                results.totalBalance += changeResult.balance.total;
+                results.utxos.push(...changeResult.utxos);
+                lastUsedChangeIndex = i;
+            }
+        }
+
+        if (isSearch && i >= 4) {
+            break;
         }
     }
 
-    // After finding used addresses, determine the freshest receive and change addresses
-    results.freshReceiveAddress = await checkFreshAddress(account, lastUsedReceiveIndex + 1, 0, network, bipType, electrumClient, paths[bipType]);
-    results.freshChangeAddress = await checkFreshAddress(account, lastUsedChangeIndex + 1, 1, network, bipType, electrumClient, paths[bipType]);
+    // Determine the freshest receive and change addresses
+    results.freshReceiveAddress = await checkFreshAddress(account, lastUsedReceiveIndex + 1, 0, network, bipType, electrumClient, path);
+    results.freshChangeAddress = await checkFreshAddress(account, lastUsedChangeIndex + 1, 1, network, bipType, electrumClient, path);
 
     return results;
 }
