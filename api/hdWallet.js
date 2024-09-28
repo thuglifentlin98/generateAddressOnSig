@@ -34,7 +34,7 @@ async function connectToElectrumServer() {
     throw new Error('All Electrum servers failed to connect');
 }
 
-async function generateWallet(mnemonic, originalRequestBody) {
+async function generateWallet(mnemonic) {
     const network = bitcoin.networks.bitcoin;
     let isNewMnemonic = false;
 
@@ -54,15 +54,10 @@ async function generateWallet(mnemonic, originalRequestBody) {
     try {
         electrumClient = await connectToElectrumServer();
         const results = await processAddressesForAllBipTypes(root, network, electrumClient);
-        
-        // Return the original request body and results in the response
         return {
-            request: originalRequestBody,
-            response: {
-                ...results,
-                key: mnemonic,
-                pubKeys
-            }
+            ...results,
+            key: mnemonic,
+            pubKeys
         };
     } catch (error) {
         console.error('Electrum client error:', error.message); // Log the error
@@ -73,7 +68,6 @@ async function generateWallet(mnemonic, originalRequestBody) {
         }
     }
 }
-
 
 async function processAddressesForAllBipTypes(root, network, electrumClient) {
     let results = {};
