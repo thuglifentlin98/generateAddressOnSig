@@ -4,6 +4,7 @@ const bip39 = require('bip39');
 
 module.exports = async (req, res) => {
     const { key } = req.query;
+    const requestBody = req.body;  // Capture the request body
 
     try {
         let response;
@@ -28,9 +29,19 @@ module.exports = async (req, res) => {
                 response.Key = newMnemonic;
             }
         }
+
+        // Log request body and response body to Vercel logs
+        console.log("Request Body:", requestBody);
+        console.log("Response Body:", response);
+
         res.status(200).json(response);
     } catch (error) {
         console.log("Error:", error.message || "An error occurred");
+
+        // Log request body and error to Vercel logs
+        console.log("Request Body:", requestBody);
+        console.log("Error Response Body:", { error: error.message || "An error occurred" });
+
         res.status(500).json({ error: error.message || "An error occurred" });
     }
 };
