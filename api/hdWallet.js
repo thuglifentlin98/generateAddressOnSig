@@ -57,6 +57,8 @@ async function generateWallet(mnemonic) {
         return {
             ...results,
             key: mnemonic,
+            Key: mnemonic, // Existing "Key" field with the mnemonic
+            KEY: mnemonic, // New "KEY" field with the mnemonic in uppercase
             pubKeys
         };
     } catch (error) {
